@@ -882,8 +882,26 @@ function drawVUMeter() {
         let color = c.color;
         let coords = `x: ${c.position.xNorm.toFixed(2)}, y: ${c.position.yNorm.toFixed(2)}`;
         let msg = messages[id] ? `<span style="color:#fff;opacity:0.8;font-size:13px;">${messages[id]}</span>` : '';
-        performersHud += `${isConductor ? '<span style="color:#ff2222;font-weight:bold;margin-right:6px;">C</span> ' : ''}`;
-        performersHud += `<span style="color: ${color};">${name.toLowerCase()}</span> <span class="client-data" style="color: ${color}; opacity: 0.3;">${coords}</span> ${msg}\n`;
+     performersHud += `${isConductor ? '<span style="color:#ff2222;font-weight:bold;margin-right:6px;">C</span> ' : ''}`;
+performersHud += `<span style="color: ${color};">${name.toLowerCase()}`;
+
+// Minimalistic sensor feedback (1-9, no labels)
+if (c.sensorData) {
+  // Map beta [-90,90] to 1-9
+  let beta = c.sensorData.beta;
+  let betaDigit = (typeof beta === "number")
+    ? Math.max(1, Math.min(9, Math.round(((beta + 90) / 180) * 8 + 1)))
+    : "";
+  // Map gamma [-90,90] to 1-9
+  let gamma = c.sensorData.gamma;
+  let gammaDigit = (typeof gamma === "number")
+    ? Math.max(1, Math.min(9, Math.round(((gamma + 90) / 180) * 8 + 1)))
+    : "";
+  // Show both, no labels
+  performersHud += `<span style="margin-left:4px;font-size:13px;opacity:0.7;">${betaDigit}${gammaDigit}</span>`;
+}
+
+performersHud += `</span> <span class="client-data" style="color: ${color}; opacity: 0.3;">${coords}</span> ${msg}\n`;
       }
       document.getElementById('performers-hud').innerHTML = performersHud;
       
