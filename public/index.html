@@ -1051,5 +1051,81 @@ function drawVUMeter() {
       };
     // Ensure all script blocks are closed
     </script>
+
+    <script>
+/* ==== Sweep Filter Controlled by Device Rotation ==== */
+
+// --- Config ---
+const minFreq = 200, maxFreq = 2000; // Filter sweep range (Hz)
+let sensorsEnabled = false;
+
+// --- Create a filter and connect to master output ---
+const sweepFilter = new Tone.Filter(minFreq, "lowpass").toDestination();
+Tone.Destination.disconnect(); // Disconnect default destination
+Tone.Destination.connect(sweepFilter);
+
+// --- HUD for debugging ---
+const hud = document.createElement("div");
+Object.assign(hud.style, {
+  position: "fixed", top: "10px", left: "10px",
+  color: "lightgray", fontSize: "1.1em", fontFamily: "monospace",
+  background: "rgba(0, 0, 0, 0.5)", padding: "5px 10px", borderRadius: "5px",
+  zIndex: "1000", pointerEvents: "none"
+});
+document.body.appendChild(hud);
+
+// --- Permission Request ---
+async function requestSensorPermissions() {
+  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+    try {
+      const permissionState = await DeviceMotionEvent.requestPermission();
+      if (permissionState === "granted") sensorsEnabled = true;
+      else console.error("Sensor access denied");
+    } catch (e) { console.error("Sensor permission error", e); }
+  } else {
+    sensorsEnabled = true;
+  }
+  await Tone.start();
+  console.log("AudioContext started, sensorsEnabled:", sensorsEnabled);
+}
+
+// --- Orientation Handler ---
+let rotX = 0, rotY = 0, rotZ = 0, initialBeta = null;
+function orientationHandler(event) {
+  if (!sensorsEnabled) return;
+  // Use beta (front-back tilt) for sweep
+  if (initialBeta === null) initialBeta = event.beta || 0;
+  rotX = event.beta || 0;
+  rotY = event.gamma || 0;
+  rotZ = event.alpha || 0;
+  // Map beta (rotX) from initialBeta±45° to minFreq-maxFreq
+  let sweep = Math.max(-45, Math.min(45, rotX - initialBeta));
+  let freq = minFreq + ((sweep + 45) / 90) * (maxFreq - minFreq);
+  sweepFilter.frequency.rampTo(freq, 0.1);
+  // HUD
+  hud.innerHTML = `rotX (beta): ${rotX.toFixed(1)}<br>Filter freq: ${freq.toFixed(1)} Hz`;
+}
+
+// --- Enable on user gesture ---
+document.body.addEventListener("touchend", async () => {
+  if (!sensorsEnabled) {
+    await requestSensorPermissions();
+    if (sensorsEnabled) {
+      window.addEventListener("deviceorientation", orientationHandler, false);
+      console.log("Sweep filter sensor control enabled!");
+    }
+  }
+});
+// Also allow desktop click for testing
+document.body.addEventListener("click", async () => {
+  if (!sensorsEnabled) {
+    await requestSensorPermissions();
+    if (sensorsEnabled) {
+      window.addEventListener("deviceorientation", orientationHandler, false);
+      console.log("Sweep filter sensor control enabled!");
+    }
+  }
+});
+</script>
   </body>
 </html>
