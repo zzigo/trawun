@@ -809,19 +809,30 @@ function drawVUMeter() {
       }
     });
     
-    // Create a shared ConvolutionReverb effect that can be reused
-    let reverbEffect = null;
+    // Reverb setup
+    function createReverb(level) {
+      if (!level) return null;
+      const reverbTime = Math.max(0.5, level * 0.5); // 0.5s to 4.5s
+      const wetLevel = Math.min(0.8, 0.4 + (level / 9) * 0.4);
+      
+      return new Tone.Reverb({
+        decay: reverbTime,
+        wet: wetLevel,
+        preDelay: 0.01
+      });
+    }
     
     // Helper function to play generator sounds
     function playGeneratorSound(data) {
       console.log("playGeneratorSound called with:", JSON.stringify(data, null, 2));
-  // --- Physics: if sine event, assign SineCirclePhysics to this client ---
-  if ((data.type === 'sine' || data.type === 'sf') && clients[clientId]) {
-    if (!clients[clientId].physics || typeof clients[clientId].physics.trigger !== 'function') {
-      clients[clientId].physics = new SineCirclePhysics(clients[clientId].role === 'conductor' ? 50 : 30);
-    }
-    clients[clientId].physics.trigger(performance.now());
-  }
+      
+      // --- Physics: if sine event, assign SineCirclePhysics to this client ---
+      if ((data.type === 'sine' || data.type === 'sf') && clients[clientId]) {
+        if (!clients[clientId].physics || typeof clients[clientId].physics.trigger !== 'function') {
+          clients[clientId].physics = new SineCirclePhysics(clients[clientId].role === 'conductor' ? 50 : 30);
+        }
+        clients[clientId].physics.trigger(performance.now());
+      }
 
   // Add visual feedback for audio events
   pendingVisualPulses.push(performance.now() + 100); // Add pulse with slight delay
@@ -832,184 +843,75 @@ function drawVUMeter() {
     
     if (isPoly) {
       try {
-        // For SF type sounds, use an envelope with fade-in and fade-out
-        if (data.type === 'sf') {
-          console.log(`🔈 Creating new synth for SF sound with envelope`);
-          
-          // Calculate fade times based on duration (15% fade-in, 25% fade-out)
-          const fadeInTime = Math.min(0.15 * data.dur, 0.3); // max 300ms
-          const fadeOutTime = Math.min(0.25 * data.dur, 0.5); // max 500ms
-          const sustainTime = data.dur - fadeInTime - fadeOutTime;
-          
-          // Create effects chain - reverb and/or panner as needed
-          let finalOutput = sweepFilter;
-          let reverbNode = null;
-          let pannerNode = null;
-          
-          // Create reverb if specified
-          if (data.reverb) {
-            // Calculate reverb time based on parameter (1-9 scale) - exponential increase
-            // r1 = 0.05s, r5 = 2s, r9 = 8s (much more dramatic range)
-            const reverbTime = data.reverb === 1 ? 0.05 : Math.pow(data.reverb / 2, 2);
+        // --- Sound generator processing ---
+      if (data.generator === 's') {
+        try {
+          // Choose envelope based on sound type
+          let envelope = {};
+          if (data.type === 'sf') {
+            // SF uses 40% of the duration for fade in/out
+            const fadeInTime = 0.4 * data.dur;
+            const fadeOutTime = 0.4 * data.dur;
+            console.log(`🔈 Creating SF sound: ${fadeInTime}s fade-in, ${fadeOutTime}s fade-out`);
             
-            // Wet/dry mix increases with higher reverb values
-            const wetLevel = Math.min(0.8, 0.3 + (data.reverb / 9) * 0.5);
-            
-            try {
-              // Create a reverb effect
-              reverbNode = new Tone.Reverb({
-                decay: reverbTime,
-                wet: wetLevel,
-                preDelay: data.reverb > 5 ? 0.03 : 0.01
-              }).connect(sweepFilter);
-              
-              // Make reverb available immediately without waiting for buffer generation
-              reverbNode.generate();
-              finalOutput = reverbNode;
-              console.log(`🔊 Reverb created with decay: ${reverbTime}s (level ${data.reverb}/9)`);
-            } catch (err) {
-              console.error('Failed to create reverb:', err);
-            }
-          }
-          
-          // Create panner if needed
-          if (typeof data.pan === 'number') {
-            pannerNode = new Tone.Panner(data.pan);
-            
-            // Connect panner to the right destination
-            if (reverbNode) {
-              pannerNode.connect(reverbNode);
-            } else {
-              pannerNode.connect(sweepFilter);
-            }
-            
-            finalOutput = pannerNode;
-            console.log(`🔊 SF Panner created with position: ${data.pan}`);
-          }
-          
-          // Create a synth with envelope
-          let thisSynth = new Tone.Synth({
-            envelope: {
+            envelope = {
               attack: fadeInTime,
               decay: 0.01,
-              sustain: 1,
+              sustain: 0.9,
               release: fadeOutTime
-            }
-          });
-          
-          // Connect to the effect chain
-          if (pannerNode) {
-            thisSynth.connect(pannerNode);
-          } else if (reverbNode) {
-            thisSynth.connect(reverbNode);
+            };
           } else {
-            thisSynth.connect(sweepFilter);
+            // Regular sine wave
+            console.log(`🔈 Creating regular sine wave`);
+            envelope = {
+              attack: 0.01,
+              decay: 0.01,
+              sustain: 1,
+              release: 0.1
+            };
           }
           
-          // Set volume
-          if (typeof data.vol === 'number' && thisSynth.volume) {
-            let dbValue = Tone.gainToDb(data.vol / 9);
-            thisSynth.volume.value = dbValue;
-            console.log(`🔊 SF Volume: ${data.vol}/9 => ${dbValue}dB, envelope: attack=${fadeInTime}s, release=${fadeOutTime}s`);
+          // Create the synth with appropriate envelope
+          let thisSynth = new Tone.Synth({ envelope }).toDestination();
+          
+          // Set volume if specified
+          if (typeof data.vol === 'number') {
+            thisSynth.volume.value = Tone.gainToDb(data.vol / 9);
+            console.log(`🔊 Volume: ${data.vol}/9`);
           }
           
-          // Add reverb info to the log
-          const reverbInfo = data.reverb ? `, reverb: ${data.reverb}/9` : '';
-          console.log(`🎵 PLAYING SF: ${data.freq}Hz for ${data.dur}s (envelope: ${fadeInTime}s→${sustainTime}s→${fadeOutTime}s)${reverbInfo}`);
-          thisSynth.triggerAttackRelease(data.freq, sustainTime + fadeInTime);
-          
-          // Add extra time for reverb tail before disposing - match our new exponential scale
-          const extraTime = data.reverb ? (data.reverb > 1 ? Math.pow(data.reverb / 2, 2) * 1000 : 100) : 0;
-          setTimeout(() => {
-            console.log(`🗑️ Disposing SF synth and effects after ${data.dur}s`);
-            thisSynth.dispose();
-            // Also dispose of the effects
-            if (reverbNode) reverbNode.dispose();
-            if (pannerNode) pannerNode.dispose();
-          }, data.dur * 1000 + 200 + extraTime);
-        } else {
-          // Regular polyphonic sound (not SF type)
-          console.log(`🔈 Creating new synth for polyphonic sound`);
-          
-          // Create effects chain for regular sounds too
-          let finalOutput = sweepFilter;
-          let reverbNode = null;
-          let pannerNode = null;
-          
-          // Create reverb if specified
-          if (data.reverb) {
-            // Calculate reverb time based on parameter (1-9 scale) - exponential increase
-            // r1 = 0.05s, r5 = 2s, r9 = 8s (much more dramatic range)
-            const reverbTime = data.reverb === 1 ? 0.05 : Math.pow(data.reverb / 2, 2);
-            
-            // Wet/dry mix increases with higher reverb values
-            const wetLevel = Math.min(0.8, 0.3 + (data.reverb / 9) * 0.5);
-            
-            try {
-              // Create a reverb effect
-              reverbNode = new Tone.Reverb({
-                decay: reverbTime,
-                wet: wetLevel,
-                preDelay: data.reverb > 5 ? 0.03 : 0.01
-              }).connect(sweepFilter);
-              
-              // Make reverb available immediately without waiting for buffer generation
-              reverbNode.generate();
-              finalOutput = reverbNode;
-              console.log(`🔊 Reverb created with decay: ${reverbTime}s (level ${data.reverb}/9)`);
-            } catch (err) {
-              console.error('Failed to create reverb:', err);
-            }
-          }
-          
-          // Create panner if needed
+          // Apply panning if needed
           if (typeof data.pan === 'number') {
-            pannerNode = new Tone.Panner(data.pan);
-            
-            // Connect panner to the right destination
-            if (reverbNode) {
-              pannerNode.connect(reverbNode);
-            } else {
-              pannerNode.connect(sweepFilter);
+            thisSynth.disconnect();
+            const panner = new Tone.Panner(data.pan).toDestination();
+            thisSynth.connect(panner);
+            console.log(`🔊 Panning: ${data.pan}`);
+          }
+          
+          // Apply reverb if needed
+          if (data.reverb) {
+            const reverb = createReverb(data.reverb);
+            if (reverb) {
+              thisSynth.disconnect();
+              reverb.toDestination();
+              thisSynth.connect(reverb);
+              console.log(`🔊 Reverb: level ${data.reverb}/9`);
             }
-            
-            finalOutput = pannerNode;
-            console.log(`🔊 Panner created with position: ${data.pan}`);
           }
           
-          // Create the synth
-          let thisSynth = new Tone.Synth();
-          
-          // Connect to the effect chain
-          if (pannerNode) {
-            thisSynth.connect(pannerNode);
-          } else if (reverbNode) {
-            thisSynth.connect(reverbNode);
-          } else {
-            thisSynth.connect(sweepFilter);
-          }
-          
-          if (typeof data.vol === 'number' && thisSynth.volume) {
-            let dbValue = Tone.gainToDb(data.vol / 9);
-            thisSynth.volume.value = dbValue;
-            console.log(`🔊 Volume set to: ${data.vol}/9 => ${dbValue}dB`);
-          }
-          
-          // Add reverb info to the log
-          const reverbInfo = data.reverb ? `, reverb: ${data.reverb}/9` : '';
-          console.log(`🎵 PLAYING: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}${reverbInfo}`);
+          // Play the sound
+          console.log(`🎵 PLAYING: ${data.freq}Hz for ${data.dur}s`);
           thisSynth.triggerAttackRelease(data.freq, data.dur);
           
-          // Add extra time for reverb tail before disposing - match our new exponential scale
-          const extraTime = data.reverb ? (data.reverb > 1 ? Math.pow(data.reverb / 2, 2) * 1000 : 100) : 0;
+          // Dispose after appropriate delay
+          const extraTime = data.reverb ? (data.reverb * 500) : 0;
           setTimeout(() => {
-            console.log(`🗑️ Disposing synth after ${data.dur}s`);
             thisSynth.dispose();
-            // Also dispose of the effects
-            if (reverbNode) reverbNode.dispose();
-            if (pannerNode) pannerNode.dispose();
-          }, data.dur * 1000 + 100 + extraTime);
+          }, data.dur * 1000 + 500 + extraTime);
+        } catch (err) {
+          console.error('Error playing sound:', err);
         }
+      }
         messages[clientId] = `sf${data.freq}^${data.dur}`;
         console.log(`[sf] generator event played: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
       } catch (err) {
@@ -1186,15 +1088,66 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
       document.getElementById('conductorControls').style.display = audioStarted && role === 'conductor' ? 'block' : 'none';
     }
     
-    // --- Keyboard Shortcut: Ctrl+C to become conductor ---
+    // Track the last command for macros
+    let lastCommand = null;
+    
+    // --- Keyboard Shortcuts: Ctrl+C and Alt+[1-5] ---
     document.addEventListener('keydown', function(e) {
       // Only trigger if not typing in an input/textarea
       const active = document.activeElement;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && active && active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA') {
-        e.preventDefault();
+      const isInputField = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      
+      // Ctrl+C becomes conductor
+      if (!isInputField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         socket.emit('requestConductor');
         messages[clientId] = 'Requested conductor role (via Ctrl+C)';
         updateHUD();
+        e.preventDefault();
+        return;
+      }
+      
+      // Handle Alt+number macros for manipulating last command
+      if (!isInputField && e.altKey && lastCommand && audioStarted) {
+        let newCommand = null;
+        
+        // Alt+1: Repeat last command exactly
+        if (e.key === '1') {
+          console.log(`🔁 Repeating last command: ${lastCommand}`);
+          newCommand = lastCommand;
+        }
+        // Alt+2: Play with half duration
+        else if (e.key === '2') {
+          // Find any duration patterns like ^X and halve the value
+          newCommand = lastCommand.replace(/\^(\d+(\.\d+)?)/g, (match, p1) => {
+            const halfDuration = parseFloat(p1) / 2;
+            return `^${halfDuration}`;
+          });
+          console.log(`⏱️ Half duration: ${lastCommand} → ${newCommand}`);
+        }
+        // Alt+3: Play with double duration
+        else if (e.key === '3') {
+          // Find any duration patterns like ^X and double the value
+          newCommand = lastCommand.replace(/\^(\d+(\.\d+)?)/g, (match, p1) => {
+            const doubleDuration = parseFloat(p1) * 2;
+            return `^${doubleDuration}`;
+          });
+          console.log(`⏱️ Double duration: ${lastCommand} → ${newCommand}`);
+        }
+        // Alt+5: Randomize all numeric values
+        else if (e.key === '5') {
+          // Match all numeric patterns and randomize them
+          newCommand = lastCommand.replace(/(\d+)(\.\d+)?/g, (match) => {
+            const originalValue = parseFloat(match);
+            const randomFactor = 0.5 + Math.random(); // 0.5 to 1.5 range
+            return Math.round(originalValue * randomFactor);
+          });
+          console.log(`🎲 Randomized: ${lastCommand} → ${newCommand}`);
+        }
+        
+        if (newCommand) {
+          e.preventDefault();
+          evaluateCommand(newCommand);
+        }
       }
     });
     // --- Centralized Command Parsing Integration ---
@@ -1202,6 +1155,11 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
     // (if using modules)
     // For inlined/legacy, ensure parseCommand is available globally.
     function evaluateCommand(command) {
+      if (!command) return;
+      
+      // Store command for macros
+      lastCommand = command;
+      
       const trimmedCommand = command.trim();
       console.log(`[command] Evaluating: "${trimmedCommand}"`);
 
@@ -1212,18 +1170,15 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
           processSineCommand(parsed.freq, parsed.dur);
           return;
         } else if (parsed.generator === 'sf') {
-          if (role === 'conductor') {
-            pendingVisualPulses.push(performance.now());
-            socket.emit('generator', { type: 'sf', ...parsed, timestamp: Date.now() });
-            messages[clientId] = `Sent ${trimmedCommand} to all clients`;
-            updateHUD();
-            // Play locally for conductor
-            if (audioStarted && typeof runSfGenerator === 'function') {
-              runSfGenerator({ ...parsed, onTrigger: playGeneratorSound });
-            }
-          } else {
-            messages[clientId] = 'Only conductor can send sf commands';
-            updateHUD();
+          // Allow any role to send SF commands
+          pendingVisualPulses.push(performance.now());
+          socket.emit('generator', { type: 'sf', ...parsed, timestamp: Date.now() });
+          messages[clientId] = `Sent ${trimmedCommand}`;
+          updateHUD();
+            
+          // Play locally
+          if (audioStarted && typeof runSfGenerator === 'function') {
+            runSfGenerator({ ...parsed, onTrigger: playGeneratorSound });
           }
           return;
         }

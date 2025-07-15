@@ -129,8 +129,10 @@ sf100-500r3        # Sine cloud with moderate reverb
 The reverb parameter 'r' applies a convolution reverb effect:
 - Values range from 1-9 representing reverb time (decay)
 - r1 = 50ms (minimal room)
-- r9 = 1000ms (large hall)
+- r5 = 2s (medium hall)
+- r9 = 8s (cathedral/ambient space)
 - Default is r1 when using just 'r' with no number
+- Higher values also increase the wet/dry mix ratio for more dramatic effect
 
 #### Chopping/Gate
 
