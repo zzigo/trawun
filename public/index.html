@@ -914,7 +914,21 @@ function drawVUMeter() {
       document.getElementById('conductorControls').style.display = audioStarted && role === 'conductor' ? 'block' : 'none';
     }
     
-    // --- Syno Sine Fade Cloud (sf) Integration ---
+    // --- Keyboard Shortcut: Ctrl+C to become conductor ---
+    document.addEventListener('keydown', function(e) {
+      // Only trigger if not typing in an input/textarea
+      const active = document.activeElement;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && active && active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        socket.emit('requestConductor');
+        messages[clientId] = 'Requested conductor role (via Ctrl+C)';
+        updateHUD();
+      }
+    });
+    // --- Centralized Command Parsing Integration ---
+    // Import parseCommand from parsers/commandParser.js at the top of your script:
+    // import { parseCommand } from '../parsers/commandParser.js'; (if using modules)
+    // For inlined/legacy, ensure parseCommand is available globally.
     function evaluateCommand(command) {
       const trimmedCommand = command.trim();
       console.log(`[command] Evaluating: "${trimmedCommand}"`);

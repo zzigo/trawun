@@ -109,25 +109,6 @@ export class SineCirclePhysics {
 // Example: sf20-440^1*5v1)^10
 //          sf20-440^1*5rv1)^10
 //          sf20-440^1*5v1vr)^10v3
-export function parseSfCommand(cmd) {
-  // Regex: sf20-440^1*5rv1)^10v3
-  const re = /^sf(\d+)-(\d+)(?:\^(\d+\.?\d*)?)?\*(\d+)(r?)(v\d+|vr)?\)\^(\d+)(v\d+)?$/i;
-  const m = cmd.match(re);
-  if (!m) return null;
-  const [_, minF, maxF, dur, count, freqRand, volMod, window, overallVol] = m;
-  return {
-    minFreq: parseFloat(minF),
-    maxFreq: parseFloat(maxF),
-    dur: dur ? parseFloat(dur) : 1,
-    count: parseInt(count),
-    freqRand: freqRand === 'r',
-    volRand: volMod === 'vr',
-    vol: (volMod && volMod.startsWith('v') && !volMod.endsWith('r')) ? parseInt(volMod.slice(1)) : null,
-    window: parseFloat(window),
-    overallVol: overallVol ? parseInt(overallVol.slice(1)) : null
-  };
-}
-
 export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol, onTrigger }) {
   // Pick a random frequency for this node, or per event if freqRand
   let baseFreq = minFreq + Math.random() * (maxFreq - minFreq);
