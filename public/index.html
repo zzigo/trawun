@@ -386,8 +386,8 @@ let meterLevel = 0;
       let targetX = c.position.xNorm * windowWidth;
       let targetY = c.position.yNorm * windowHeight;
       
-      // Timer-based interpolation for true 1s transitions
-      const duration = 10000; // ms
+      // Timer-based interpolation with 300ms transitions (smooth but responsive)
+      const duration = 300; // ms - quick transitions for better responsiveness
       let now = millis ? millis() : Date.now();
       if ((Math.abs(c.toPos.x - targetX) > 1) || (Math.abs(c.toPos.y - targetY) > 1)) {
         // New target detected, start new transition
@@ -395,9 +395,11 @@ let meterLevel = 0;
         c.toPos = { x: targetX, y: targetY };
         c.moveStartTime = now;
       }
-      let amt = constrain((now - c.moveStartTime) / duration, 0, 1);
-      c.interpolatedPos.x = lerp(c.fromPos.x, c.toPos.x, amt);
-      c.interpolatedPos.y = lerp(c.fromPos.y, c.toPos.y, amt);
+      // Apply easeOutCubic easing for smoother motion
+      let t = constrain((now - c.moveStartTime) / duration, 0, 1);
+      let easing = 1 - Math.pow(1 - t, 3); // easeOutCubic for smoother transitions
+      c.interpolatedPos.x = lerp(c.fromPos.x, c.toPos.x, easing);
+      c.interpolatedPos.y = lerp(c.fromPos.y, c.toPos.y, easing);
       
       // --- VU meter color for border ---
       let vuAlpha = map(meterLevel, 0, 1, 80, 255);
@@ -743,11 +745,37 @@ function drawVUMeter() {
           // Confirm successful playback
           socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
         }
-      } else if (data.type === 'sf' && typeof runSfGenerator === 'function') {
-        // Run the sine fade cloud generator
-        runSfGenerator({ ...data, onTrigger: playGeneratorSound });
-        // Optionally send a confirmation back
-        socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+      } else if (data.type === 'sf') {
+        console.log('SF Generator event received - attempting to process');
+        
+        // Check if runSfGenerator is available
+        if (typeof window.runSfGenerator === 'function') {
+          console.log('Using window.runSfGenerator');
+          window.runSfGenerator({ ...data, onTrigger: playGeneratorSound });
+          socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+        } else if (typeof runSfGenerator === 'function') {
+          console.log('Using local runSfGenerator');
+          runSfGenerator({ ...data, onTrigger: playGeneratorSound });
+          socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+        } else {
+          console.error('runSfGenerator function not found! Creating direct sounds instead.');
+          
+          // Fallback implementation if runSfGenerator isn't available
+          const count = data.count || 5;
+          const minFreq = data.minFreq || 300;
+          const maxFreq = data.maxFreq || 500;
+          const dur = data.dur || 1;
+          const window = data.window || 10;
+          
+          for (let i = 0; i < count; i++) {
+            setTimeout(() => {
+              const freq = minFreq + Math.random() * (maxFreq - minFreq);
+              playGeneratorSound({ type: 'sf', freq, dur, vol: data.vol || 9 });
+            }, Math.random() * window * 1000);
+          }
+          
+          socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+        }
       }
     });
     
@@ -767,17 +795,79 @@ function drawVUMeter() {
 
   try {
     let isPoly = data.type === 'sf' || typeof data.vol === 'number';
+    console.log(`🎹 Sound type check - isPoly: ${isPoly}, data.type: '${data.type}', has vol: ${typeof data.vol === 'number'}`);
+    
     if (isPoly) {
-      // Polyphonic: create a new synth for each note
-      let thisSynth = new Tone.Synth().connect(sweepFilter);
-      if (typeof data.vol === 'number' && thisSynth.volume) {
-        thisSynth.volume.value = Tone.gainToDb(data.vol / 9);
+      try {
+        // For SF type sounds, use an envelope with fade-in and fade-out
+        if (data.type === 'sf') {
+          console.log(`🔈 Creating new synth for SF sound with envelope`);
+          
+          // Calculate fade times based on duration (15% fade-in, 25% fade-out)
+          const fadeInTime = Math.min(0.15 * data.dur, 0.3); // max 300ms
+          const fadeOutTime = Math.min(0.25 * data.dur, 0.5); // max 500ms
+          const sustainTime = data.dur - fadeInTime - fadeOutTime;
+          
+          // Create panner if needed
+          let panner = null;
+          if (typeof data.pan === 'number') {
+            panner = new Tone.Panner(data.pan).connect(sweepFilter);
+            console.log(`🔊 SF Panner created with position: ${data.pan}`);
+          }
+          
+          // Create a synth with envelope
+          let thisSynth = new Tone.Synth({
+            envelope: {
+              attack: fadeInTime,
+              decay: 0.01,
+              sustain: 1,
+              release: fadeOutTime
+            }
+          });
+          
+          // Connect through panner if it exists, otherwise direct to sweepFilter
+          if (panner) {
+            thisSynth.connect(panner);
+          } else {
+            thisSynth.connect(sweepFilter);
+          }
+          
+          // Set volume
+          if (typeof data.vol === 'number' && thisSynth.volume) {
+            let dbValue = Tone.gainToDb(data.vol / 9);
+            thisSynth.volume.value = dbValue;
+            console.log(`🔊 SF Volume: ${data.vol}/9 => ${dbValue}dB, envelope: attack=${fadeInTime}s, release=${fadeOutTime}s`);
+          }
+          
+          console.log(`🎵 PLAYING SF: ${data.freq}Hz for ${data.dur}s (envelope: ${fadeInTime}s→${sustainTime}s→${fadeOutTime}s)`);
+          thisSynth.triggerAttackRelease(data.freq, sustainTime + fadeInTime);
+          setTimeout(() => {
+            console.log(`🗑️ Disposing SF synth after ${data.dur}s`);
+            thisSynth.dispose();
+          }, data.dur * 1000 + 200);
+        } else {
+          // Regular polyphonic sound (not SF type)
+          console.log(`🔈 Creating new synth for polyphonic sound`);
+          let thisSynth = new Tone.Synth().connect(sweepFilter);
+          
+          if (typeof data.vol === 'number' && thisSynth.volume) {
+            let dbValue = Tone.gainToDb(data.vol / 9);
+            thisSynth.volume.value = dbValue;
+            console.log(`🔊 Volume set to: ${data.vol}/9 => ${dbValue}dB`);
+          }
+          
+          console.log(`🎵 PLAYING: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+          thisSynth.triggerAttackRelease(data.freq, data.dur);
+          setTimeout(() => {
+            console.log(`🗑️ Disposing synth after ${data.dur}s`);
+            thisSynth.dispose();
+          }, data.dur * 1000 + 100);
+        }
+        messages[clientId] = `sf${data.freq}^${data.dur}`;
+        console.log(`[sf] generator event played: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+      } catch (err) {
+        console.error('Error playing polyphonic sound:', err);
       }
-      console.log(`(sf/poly) Reproduciendo: ${data.freq}Hz por ${data.dur}s, vol: ${data.vol ?? 'default'}`);
-      thisSynth.triggerAttackRelease(data.freq, data.dur);
-      setTimeout(() => thisSynth.dispose(), data.dur * 1000 + 100);
-      messages[clientId] = `sf${data.freq}^${data.dur}`;
-      console.log(`[sf] generator event played: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
     } else {
       // Monophonic fallback for 's'
       if (!synth) {

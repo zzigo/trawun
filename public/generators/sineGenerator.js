@@ -109,10 +109,24 @@ export class SineCirclePhysics {
 // Example: sf20-440^1*5v1)^10
 //          sf20-440^1*5rv1)^10
 //          sf20-440^1*5v1vr)^10v3
-export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol, onTrigger }) {
-  // Pick a random frequency for this node, or per event if freqRand
-
-  console.log("⚡ runSfGenerator called with:", { minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol });
+export function runSfGenerator(params) {
+  // Destructure with defaults
+  const { 
+    minFreq, 
+    maxFreq, 
+    dur = 1,
+    count = 5,
+    freqRand = false,
+    volRand = false,
+    vol = 1,
+    window = 10,
+    overallVol = null,
+    pan = 0,
+    panRand = false,
+    onTrigger 
+  } = params;
+  
+  console.log("⚡ runSfGenerator called with:", params);
   
   // Check if Tone.js is available and active
   console.log("🎵 Audio System Status:", {
@@ -122,20 +136,27 @@ export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand
     onTriggerIsFunction: typeof onTrigger === 'function'
   });
   
-  let baseFreq = minFreq + Math.random() * (maxFreq - minFreq);
+  let baseFreq = (minFreq + maxFreq) / 2;
   let now = (typeof millis === 'function') ? millis() : Date.now();
+  
   for (let i = 0; i < count; i++) {
     // Time offset within window
     let tOffset = Math.random() * window * 1000;
-    // Frequency
+    
+    // Frequency - either random within range or base frequency
     let f = freqRand ? (minFreq + Math.random() * (maxFreq - minFreq)) : baseFreq;
-    // Volume
-    let v = volRand ? (1 + Math.floor(Math.random() * 9)) : (vol || 9);
+    
+    // Volume - either random or specified
+    let v = volRand ? (1 + Math.floor(Math.random() * 9)) : vol;
     if (overallVol) v = Math.round(v * overallVol / 9);
+    
+    // Panning - either random or specified
+    let p = panRand ? (-1 + Math.random() * 2) : pan; // Random between -1 and 1
+    
     setTimeout(() => {
-      console.log(`🔊 SF Generator triggering sound #${i+1}/${count} after ${tOffset.toFixed(2)}ms:`, { freq: f, dur, vol: v });
+      console.log(`🔊 SF Generator triggering sound #${i+1}/${count}: ${f.toFixed(2)}Hz, vol=${v}, pan=${p.toFixed(2)}`);
       if (typeof onTrigger === 'function') {
-        onTrigger({ type: 'sf', freq: f, dur, vol: v });
+        onTrigger({ type: 'sf', freq: f, dur, vol: v, pan: p });
       } else {
         console.error('❌ onTrigger is not a function, sound cannot be played!');
       }
@@ -143,10 +164,14 @@ export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand
   }
 }
 
-
-  // Accepts: s, s220, s220^1, s^1
-  // Returns: { freq: number, dur: number }
-  let match = cmd.match(/^s(\d+)?(?:\^(\d+\.?\d*)?)?$/i);
+// Accepts: s, s220, s220^1, s^1
+// Returns: { freq: number, dur: number }
+let match = cmd.match(/^s(\d+)?(?:\^(\d+\.?\d*)?)?$/i);
+let freq = 220;
+let dur = 1;
+if (match) {
+  if (match[1]) freq = parseFloat(match[1]);
+  if (match[2]) dur = parseFloat(match[2]);
   let freq = 220;
   let dur = 1;
   if (match) {
