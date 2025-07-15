@@ -109,7 +109,20 @@ window.parseCommand = function parseCommand(cmd) {
   // Sine fade cloud generator: sf...
   const sf = parseSfCommand(cmd);
   if (sf) return sf;
-  // Sine generator: s, s220, s^2, s220^2
+
+  // Sine generator with reverb: s220r, s220r9, s220^2r3
+  let sMatchReverb = cmd.match(/^s(\d+)?(?:\^(\d*\.?\d+))?r(\d+)?$/i);
+  if (sMatchReverb) {
+    // Defaults: freq=220, dur=1, reverb=1
+    return {
+      generator: 's',
+      freq: sMatchReverb[1] ? parseFloat(sMatchReverb[1]) : 220,
+      dur: sMatchReverb[2] ? parseFloat(sMatchReverb[2]) : 1,
+      reverb: sMatchReverb[3] ? parseInt(sMatchReverb[3]) : 1
+    };
+  }
+  
+  // Standard sine generator: s, s220, s^2, s220^2
   let sMatch = cmd.match(/^s(\d+)?(?:\^(\d*\.?\d+))?$/i);
   if (sMatch) {
     // Defaults: freq=220, dur=1

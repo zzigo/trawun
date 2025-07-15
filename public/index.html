@@ -427,11 +427,41 @@ let meterLevel = 0;
         stroke((c && c.color) ? c.color : '#3498DB');
         strokeWeight(4);
         drawingContext.shadowBlur = 0;
+        
+        // Handle role-based circle size with transitions
+        const conductorSize = 100;
+        const performerSize = 60;
+        const targetSize = c.role === 'conductor' ? conductorSize : performerSize;
+        
+        // Initialize size tracking if not exists
+        if (c.currentSize === undefined) {
+          c.currentSize = targetSize;
+          c.fromSize = targetSize;
+          c.toSize = targetSize;
+          c.sizeChangeTime = now;
+        }
+        
+        // Check if role changed (target size changed)
+        if (Math.abs(c.toSize - targetSize) > 1) {
+          // Start size transition
+          c.fromSize = c.currentSize;
+          c.toSize = targetSize;
+          c.sizeChangeTime = now;
+          console.log(`Role transition for ${id}: ${c.role} (${c.fromSize} → ${c.toSize})`);
+        }
+        
+        // Animate size over 500ms with easeOutCubic
+        const sizeDuration = 500; // ms
+        let sizeT = constrain((now - c.sizeChangeTime) / sizeDuration, 0, 1);
+        let sizeEasing = 1 - Math.pow(1 - sizeT, 3); // easeOutCubic
+        c.currentSize = lerp(c.fromSize, c.toSize, sizeEasing);
+        
+        // Draw the circle with current interpolated size
         ellipse(
           c.interpolatedPos.x,
           c.interpolatedPos.y,
-          c.role === 'conductor' ? 100 : 60,
-          c.role === 'conductor' ? 100 : 60
+          c.currentSize,
+          c.currentSize
         );
       }
       
@@ -779,6 +809,9 @@ function drawVUMeter() {
       }
     });
     
+    // Create a shared ConvolutionReverb effect that can be reused
+    let reverbEffect = null;
+    
     // Helper function to play generator sounds
     function playGeneratorSound(data) {
       console.log("playGeneratorSound called with:", JSON.stringify(data, null, 2));
@@ -808,10 +841,45 @@ function drawVUMeter() {
           const fadeOutTime = Math.min(0.25 * data.dur, 0.5); // max 500ms
           const sustainTime = data.dur - fadeInTime - fadeOutTime;
           
+          // Create effects chain - reverb and/or panner as needed
+          let finalOutput = sweepFilter;
+          let reverbNode = null;
+          let pannerNode = null;
+          
+          // Create reverb if specified
+          if (data.reverb) {
+            // Calculate reverb time based on parameter (1-9 scale)
+            const reverbTime = data.reverb === 1 ? 0.05 : (data.reverb / 9) * 1.0;
+            
+            try {
+              // Create a reverb effect
+              reverbNode = new Tone.Reverb({
+                decay: reverbTime,
+                wet: 0.6,
+                preDelay: 0.01
+              }).connect(sweepFilter);
+              
+              // Make reverb available immediately without waiting for buffer generation
+              reverbNode.generate();
+              finalOutput = reverbNode;
+              console.log(`🔊 Reverb created with decay: ${reverbTime}s (level ${data.reverb}/9)`);
+            } catch (err) {
+              console.error('Failed to create reverb:', err);
+            }
+          }
+          
           // Create panner if needed
-          let panner = null;
           if (typeof data.pan === 'number') {
-            panner = new Tone.Panner(data.pan).connect(sweepFilter);
+            pannerNode = new Tone.Panner(data.pan);
+            
+            // Connect panner to the right destination
+            if (reverbNode) {
+              pannerNode.connect(reverbNode);
+            } else {
+              pannerNode.connect(sweepFilter);
+            }
+            
+            finalOutput = pannerNode;
             console.log(`🔊 SF Panner created with position: ${data.pan}`);
           }
           
@@ -825,9 +893,11 @@ function drawVUMeter() {
             }
           });
           
-          // Connect through panner if it exists, otherwise direct to sweepFilter
-          if (panner) {
-            thisSynth.connect(panner);
+          // Connect to the effect chain
+          if (pannerNode) {
+            thisSynth.connect(pannerNode);
+          } else if (reverbNode) {
+            thisSynth.connect(reverbNode);
           } else {
             thisSynth.connect(sweepFilter);
           }
@@ -839,16 +909,77 @@ function drawVUMeter() {
             console.log(`🔊 SF Volume: ${data.vol}/9 => ${dbValue}dB, envelope: attack=${fadeInTime}s, release=${fadeOutTime}s`);
           }
           
-          console.log(`🎵 PLAYING SF: ${data.freq}Hz for ${data.dur}s (envelope: ${fadeInTime}s→${sustainTime}s→${fadeOutTime}s)`);
+          // Add reverb info to the log
+          const reverbInfo = data.reverb ? `, reverb: ${data.reverb}/9` : '';
+          console.log(`🎵 PLAYING SF: ${data.freq}Hz for ${data.dur}s (envelope: ${fadeInTime}s→${sustainTime}s→${fadeOutTime}s)${reverbInfo}`);
           thisSynth.triggerAttackRelease(data.freq, sustainTime + fadeInTime);
+          
+          // Add a bit extra time for reverb tail before disposing
+          const extraTime = data.reverb ? (data.reverb / 9) * 1000 : 0;
           setTimeout(() => {
-            console.log(`🗑️ Disposing SF synth after ${data.dur}s`);
+            console.log(`🗑️ Disposing SF synth and effects after ${data.dur}s`);
             thisSynth.dispose();
-          }, data.dur * 1000 + 200);
+            // Also dispose of the effects
+            if (reverbNode) reverbNode.dispose();
+            if (pannerNode) pannerNode.dispose();
+          }, data.dur * 1000 + 200 + extraTime);
         } else {
           // Regular polyphonic sound (not SF type)
           console.log(`🔈 Creating new synth for polyphonic sound`);
-          let thisSynth = new Tone.Synth().connect(sweepFilter);
+          
+          // Create effects chain for regular sounds too
+          let finalOutput = sweepFilter;
+          let reverbNode = null;
+          let pannerNode = null;
+          
+          // Create reverb if specified
+          if (data.reverb) {
+            // Calculate reverb time based on parameter (1-9 scale)
+            const reverbTime = data.reverb === 1 ? 0.05 : (data.reverb / 9) * 1.0;
+            
+            try {
+              // Create a reverb effect
+              reverbNode = new Tone.Reverb({
+                decay: reverbTime,
+                wet: 0.6,
+                preDelay: 0.01
+              }).connect(sweepFilter);
+              
+              // Make reverb available immediately without waiting for buffer generation
+              reverbNode.generate();
+              finalOutput = reverbNode;
+              console.log(`🔊 Reverb created with decay: ${reverbTime}s (level ${data.reverb}/9)`);
+            } catch (err) {
+              console.error('Failed to create reverb:', err);
+            }
+          }
+          
+          // Create panner if needed
+          if (typeof data.pan === 'number') {
+            pannerNode = new Tone.Panner(data.pan);
+            
+            // Connect panner to the right destination
+            if (reverbNode) {
+              pannerNode.connect(reverbNode);
+            } else {
+              pannerNode.connect(sweepFilter);
+            }
+            
+            finalOutput = pannerNode;
+            console.log(`🔊 Panner created with position: ${data.pan}`);
+          }
+          
+          // Create the synth
+          let thisSynth = new Tone.Synth();
+          
+          // Connect to the effect chain
+          if (pannerNode) {
+            thisSynth.connect(pannerNode);
+          } else if (reverbNode) {
+            thisSynth.connect(reverbNode);
+          } else {
+            thisSynth.connect(sweepFilter);
+          }
           
           if (typeof data.vol === 'number' && thisSynth.volume) {
             let dbValue = Tone.gainToDb(data.vol / 9);
@@ -856,12 +987,20 @@ function drawVUMeter() {
             console.log(`🔊 Volume set to: ${data.vol}/9 => ${dbValue}dB`);
           }
           
-          console.log(`🎵 PLAYING: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+          // Add reverb info to the log
+          const reverbInfo = data.reverb ? `, reverb: ${data.reverb}/9` : '';
+          console.log(`🎵 PLAYING: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}${reverbInfo}`);
           thisSynth.triggerAttackRelease(data.freq, data.dur);
+          
+          // Add a bit extra time for reverb tail before disposing
+          const extraTime = data.reverb ? (data.reverb / 9) * 1000 : 0;
           setTimeout(() => {
             console.log(`🗑️ Disposing synth after ${data.dur}s`);
             thisSynth.dispose();
-          }, data.dur * 1000 + 100);
+            // Also dispose of the effects
+            if (reverbNode) reverbNode.dispose();
+            if (pannerNode) pannerNode.dispose();
+          }, data.dur * 1000 + 100 + extraTime);
         }
         messages[clientId] = `sf${data.freq}^${data.dur}`;
         console.log(`[sf] generator event played: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);

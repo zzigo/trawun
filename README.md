@@ -120,8 +120,17 @@ q40v1>0'10f8>2'10  # Filter sweep with volume fade
 #### Reverb
 
 ```syno
-s440v1>0r9         # Sine with 9s reverb
+s440r              # Sine with default reverb (50ms)
+s440r1             # Sine with minimal reverb (50ms)
+s440r9             # Sine with long reverb (1000ms)
+sf100-500r3        # Sine cloud with moderate reverb
 ```
+
+The reverb parameter 'r' applies a convolution reverb effect:
+- Values range from 1-9 representing reverb time (decay)
+- r1 = 50ms (minimal room)
+- r9 = 1000ms (large hall)
+- Default is r1 when using just 'r' with no number
 
 #### Chopping/Gate
 
