@@ -267,7 +267,7 @@ let meterLevel = 0;
       
       // Initialize synth immediately to avoid potential issues
       if (!synth) {
-        synth = new Tone.Synth().toDestination();
+        synth = new Tone.Synth().connect(sweepFilter);
         console.log('Synth initialized');
         
         // Play a short test tone to confirm audio is working
@@ -558,7 +558,7 @@ function drawVUMeter() {
       updateHUD();
       
       // Make sure synth is initialized
-      if (!synth) synth = new Tone.Synth().toDestination();
+      if (!synth) synth = new Tone.Synth().connect(sweepFilter);
       
       // Play a scale of notes
       const testNotes = ['C4', 'E4', 'G4', 'C5'];
@@ -769,7 +769,7 @@ function drawVUMeter() {
     let isPoly = data.type === 'sf' || typeof data.vol === 'number';
     if (isPoly) {
       // Polyphonic: create a new synth for each note
-      let thisSynth = new Tone.Synth().toDestination();
+      let thisSynth = new Tone.Synth().connect(sweepFilter);
       if (typeof data.vol === 'number' && thisSynth.volume) {
         thisSynth.volume.value = Tone.gainToDb(data.vol / 9);
       }
@@ -782,7 +782,7 @@ function drawVUMeter() {
       // Monophonic fallback for 's'
       if (!synth) {
         try {
-          synth = new Tone.Synth().toDestination();
+          synth = new Tone.Synth().connect(sweepFilter);
         } catch (err) {
           console.error('Failed to initialize synth:', err);
           return;
@@ -812,12 +812,12 @@ function drawVUMeter() {
     socket.on('control', (data) => {
       if (role === 'performer' && audioStarted) {
         if (data.type === 'freq') {
-          if (!synth) synth = new Tone.Synth().toDestination();
+          if (!synth) synth = new Tone.Synth().connect(sweepFilter);
           synth.set({ oscillator: { frequency: data.value } });
           synth.triggerAttackRelease(data.value, '8n');
           messages[clientId] = `freq ${data.value}`;
         } else if (data.type === 'sine') {
-          if (!synth) synth = new Tone.Synth().toDestination();
+          if (!synth) synth = new Tone.Synth().connect(sweepFilter);
           synth.triggerAttackRelease(data.freq, data.dur);
           messages[clientId] = `s${data.freq}^${data.dur}`;
           console.log(`[sine] Remote: ${data.freq}Hz for ${data.dur}s`);
@@ -836,7 +836,7 @@ function drawVUMeter() {
          }
          socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
        } else if (data.type === 'sine') {
-          if (!synth) synth = new Tone.Synth().toDestination();
+          if (!synth) synth = new Tone.Synth().connect(sweepFilter);
           synth.triggerAttackRelease(data.freq, data.dur);
           console.log(`[sine] Local: ${data.freq}Hz for ${data.dur}s`);
         }
@@ -1036,7 +1036,7 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
         
         // Also play locally for the conductor
         if (audioStarted) {
-          if (!synth) synth = new Tone.Synth().toDestination();
+          if (!synth) synth = new Tone.Synth().connect(sweepFilter);
           try {
             synth.triggerAttackRelease(freq, dur);
             console.log(`[sine] Conductor local playback: ${freq}Hz for ${dur}s`);
@@ -1048,7 +1048,7 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
           // Try to start audio
           Tone.start().then(() => {
             audioStarted = true;
-            if (!synth) synth = new Tone.Synth().toDestination();
+            if (!synth) synth = new Tone.Synth().connect(sweepFilter);
             synth.triggerAttackRelease(freq, dur);
             console.log('Started audio and played sound');
             updateHUD();
@@ -1079,8 +1079,6 @@ let sensorsEnabled = false;
 
 // --- Create a filter and connect to master output ---
 const sweepFilter = new Tone.Filter(minFreq, "lowpass").toDestination();
-Tone.Destination.disconnect(); // Disconnect default destination
-Tone.Destination.connect(sweepFilter);
 
 // --- HUD for debugging ---
 const hud = document.createElement("div");
