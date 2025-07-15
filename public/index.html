@@ -753,7 +753,7 @@ function drawVUMeter() {
     
     // Helper function to play generator sounds
     function playGeneratorSound(data) {
-      console.log("playGeneratorSound called", data);
+      console.log("playGeneratorSound called with:", JSON.stringify(data, null, 2));
   // --- Physics: if sine event, assign SineCirclePhysics to this client ---
   if ((data.type === 'sine' || data.type === 'sf') && clients[clientId]) {
     if (!clients[clientId].physics || typeof clients[clientId].physics.trigger !== 'function') {

@@ -112,7 +112,15 @@ export class SineCirclePhysics {
 export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol, onTrigger }) {
   // Pick a random frequency for this node, or per event if freqRand
 
-  console.log("runSfGenerator called", { minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol });
+  console.log("⚡ runSfGenerator called with:", { minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol });
+  
+  // Check if Tone.js is available and active
+  console.log("🎵 Audio System Status:", {
+    toneExists: typeof Tone !== 'undefined',
+    contextExists: typeof Tone !== 'undefined' && Tone.context !== undefined,
+    contextState: typeof Tone !== 'undefined' && Tone.context ? Tone.context.state : 'undefined',
+    onTriggerIsFunction: typeof onTrigger === 'function'
+  });
   
   let baseFreq = minFreq + Math.random() * (maxFreq - minFreq);
   let now = (typeof millis === 'function') ? millis() : Date.now();
@@ -125,8 +133,11 @@ export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand
     let v = volRand ? (1 + Math.floor(Math.random() * 9)) : (vol || 9);
     if (overallVol) v = Math.round(v * overallVol / 9);
     setTimeout(() => {
+      console.log(`🔊 SF Generator triggering sound #${i+1}/${count} after ${tOffset.toFixed(2)}ms:`, { freq: f, dur, vol: v });
       if (typeof onTrigger === 'function') {
-        onTrigger({ freq: f, dur, vol: v });
+        onTrigger({ type: 'sf', freq: f, dur, vol: v });
+      } else {
+        console.error('❌ onTrigger is not a function, sound cannot be played!');
       }
     }, tOffset);
   }
