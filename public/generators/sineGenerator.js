@@ -111,6 +111,9 @@ export class SineCirclePhysics {
 //          sf20-440^1*5v1vr)^10v3
 export function runSfGenerator({ minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol, onTrigger }) {
   // Pick a random frequency for this node, or per event if freqRand
+
+  console.log("runSfGenerator called", { minFreq, maxFreq, dur, count, freqRand, volRand, vol, window, overallVol });
+  
   let baseFreq = minFreq + Math.random() * (maxFreq - minFreq);
   let now = (typeof millis === 'function') ? millis() : Date.now();
   for (let i = 0; i < count; i++) {
@@ -148,3 +151,5 @@ export function runSineGenerator({ freq, dur, onTrigger }) {
     onTrigger({ freq, dur });
   }
 }
+
+window.runSfGenerator = runSfGenerator;

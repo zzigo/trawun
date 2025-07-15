@@ -9,6 +9,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+  <script src="parsers/commandParser.js"></script>
+  <script src="generators/sineGenerator.js"></script>
+
   <style>
     body {
       margin: 0;
@@ -721,7 +724,7 @@ function drawVUMeter() {
       // Send acknowledgment of receipt back to server
       socket.emit('generator_received', { id: clientId, dataType: data.type });
       
-      if (data.type === 'sine') {
+      if (data.type === 'sine' || data.type === 's') {
         if (!audioStarted) {
           console.warn('Audio not started. Starting audio context...');
           // Try to start audio context on this event
@@ -740,11 +743,17 @@ function drawVUMeter() {
           // Confirm successful playback
           socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
         }
+      } else if (data.type === 'sf' && typeof runSfGenerator === 'function') {
+        // Run the sine fade cloud generator
+        runSfGenerator({ ...data, onTrigger: playGeneratorSound });
+        // Optionally send a confirmation back
+        socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
       }
     });
     
     // Helper function to play generator sounds
     function playGeneratorSound(data) {
+      console.log("playGeneratorSound called", data);
   // --- Physics: if sine event, assign SineCirclePhysics to this client ---
   if ((data.type === 'sine' || data.type === 'sf') && clients[clientId]) {
     if (!clients[clientId].physics || typeof clients[clientId].physics.trigger !== 'function') {
@@ -752,40 +761,48 @@ function drawVUMeter() {
     }
     clients[clientId].physics.trigger(performance.now());
   }
+
+  // Add visual feedback for audio events
+  pendingVisualPulses.push(performance.now() + 100); // Add pulse with slight delay
+
+  try {
+    let isPoly = data.type === 'sf' || typeof data.vol === 'number';
+    if (isPoly) {
+      // Polyphonic: create a new synth for each note
+      let thisSynth = new Tone.Synth().toDestination();
+      if (typeof data.vol === 'number' && thisSynth.volume) {
+        thisSynth.volume.value = Tone.gainToDb(data.vol / 9);
+      }
+      console.log(`(sf/poly) Reproduciendo: ${data.freq}Hz por ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+      thisSynth.triggerAttackRelease(data.freq, data.dur);
+      setTimeout(() => thisSynth.dispose(), data.dur * 1000 + 100);
+      messages[clientId] = `sf${data.freq}^${data.dur}`;
+      console.log(`[sf] generator event played: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+    } else {
+      // Monophonic fallback for 's'
       if (!synth) {
         try {
-          console.log('Initializing synth...');
           synth = new Tone.Synth().toDestination();
         } catch (err) {
           console.error('Failed to initialize synth:', err);
           return;
         }
       }
-      
-      // Add visual feedback for audio events
-      pendingVisualPulses.push(performance.now() + 100); // Add pulse with slight delay
-      
-      try {
-        // Check if we can access the synth methods
-        if (typeof synth.triggerAttackRelease !== 'function') {
-          console.error('Synth.triggerAttackRelease is not a function!');
-          messages[clientId] = 'Error: Invalid synth';
-          updateHUD();
-          return;
-        }
-        
-        // Play the sound
-        console.log(`Reproduciendo: ${data.freq}Hz por ${data.dur}s`);
-        synth.triggerAttackRelease(data.freq, data.dur);
-        messages[clientId] = `s${data.freq}^${data.dur}`;
-        console.log(`[sine] generator event played: ${data.freq}Hz for ${data.dur}s`);
-        
-        // Añadir un pulso visual para mostrar que se está reproduciendo el sonido
-        document.body.style.boxShadow = 'inset 0 0 20px rgba(0,255,0,0.5)';
-        setTimeout(() => {
-          document.body.style.boxShadow = 'none';
-        }, 100);
-      } catch (err) {
+      if (typeof data.vol === 'number' && synth.volume) {
+        synth.volume.value = Tone.gainToDb(data.vol / 9);
+      }
+      console.log(`(sine/mono) Reproduciendo: ${data.freq}Hz por ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+      synth.triggerAttackRelease(data.freq, data.dur);
+      messages[clientId] = `s${data.freq}^${data.dur}`;
+      console.log(`[sine] generator event played: ${data.freq}Hz for ${data.dur}s, vol: ${data.vol ?? 'default'}`);
+    }
+
+    // Añadir un pulso visual para mostrar que se está reproduciendo el sonido
+    document.body.style.boxShadow = 'inset 0 0 20px rgba(0,255,0,0.5)';
+    setTimeout(() => {
+      document.body.style.boxShadow = 'none';
+    }, 100);
+  } catch (err) {
         console.error('Error playing sound:', err);
         messages[clientId] = `Error: ${err.message}`;
       }
@@ -927,51 +944,44 @@ function drawVUMeter() {
     });
     // --- Centralized Command Parsing Integration ---
     // Import parseCommand from parsers/commandParser.js at the top of your script:
-    // import { parseCommand } from '../parsers/commandParser.js'; (if using modules)
+    // (if using modules)
     // For inlined/legacy, ensure parseCommand is available globally.
     function evaluateCommand(command) {
       const trimmedCommand = command.trim();
       console.log(`[command] Evaluating: "${trimmedCommand}"`);
-      
-      // Test audio command
-      if (trimmedCommand.toLowerCase() === 'testaudio' || trimmedCommand.toLowerCase() === 'test') {
-        console.log('[command] Testing audio...');
-        testAudioSystem();
-        return;
+
+      // Centralized command parsing
+      const parsed = parseCommand(trimmedCommand);
+      if (parsed) {
+        if (parsed.generator === 's') {
+          processSineCommand(parsed.freq, parsed.dur);
+          return;
+        } else if (parsed.generator === 'sf') {
+          if (role === 'conductor') {
+            pendingVisualPulses.push(performance.now());
+            socket.emit('generator', { type: 'sf', ...parsed, timestamp: Date.now() });
+            messages[clientId] = `Sent ${trimmedCommand} to all clients`;
+            updateHUD();
+            // Play locally for conductor
+            if (audioStarted && typeof runSfGenerator === 'function') {
+              runSfGenerator({ ...parsed, onTrigger: playGeneratorSound });
+            }
+          } else {
+            messages[clientId] = 'Only conductor can send sf commands';
+            updateHUD();
+          }
+          return;
+        }
+        // Add more generator types here as needed
       }
-      
-      // Check if this is just 's' command (sine with defaults)
-      if (trimmedCommand.toLowerCase() === 's') {
-        console.log('[command] Simple sine command detected');
-        processSineCommand(220, 1); // Use defaults
-        return;
-      }
-      
-      // Conductor role request
-      if (trimmedCommand.toLowerCase() === 'conductor') {
-        socket.emit('requestConductor');
-        console.log('[role] Requesting conductor role...');
-        return;
-      }
-      
-      // Sine generator with parameters: s220, s^2, s220^2
-      const sMatch = trimmedCommand.match(/^s(\d+)?(?:\^(\d*\.?\d+))?$/i);
-      if (sMatch) {
-        const freq = sMatch[1] ? parseFloat(sMatch[1]) : 220;
-        const dur = sMatch[2] ? parseFloat(sMatch[2]) : 1;
-        
-        console.log(`[command] Parsed sine command: freq=${freq}, dur=${dur}`);
-        processSineCommand(freq, dur);
-        return;
-      }
-      
+
       // Audio status command
       if (trimmedCommand.toLowerCase() === 'audiostatus') {
         console.log('[command] Checking audio status');
         displayAudioStatus();
         return;
       }
-      
+
       // Other commands (freq, circle, etc)
       let parts = trimmedCommand.split(' ');
       if (parts[0] === 'freq' && parts[1]) {
@@ -994,7 +1004,6 @@ function drawVUMeter() {
         updateHUD();
       }
     }
-    
     // Helper function to process sine commands
     function processSineCommand(freq, dur) {
       if (role === 'conductor') {
