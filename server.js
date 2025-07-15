@@ -145,6 +145,22 @@ io.on('connection', (socket) => {
       });
     }
   });
+  
+  // Handle panic events (immediate stop or fade out)
+  socket.on('panic', (data) => {
+    console.log(`[SERVER] Received panic ${data.type} from ${socket.id}`);
+    
+    // Broadcast the panic event to all clients
+    const panicData = {
+      type: data.type,              // 'stop' or 'fade'
+      from: socket.id,             // Who triggered the panic
+      timestamp: Date.now(),       // Server timestamp
+      duration: data.duration || 0 // Duration for fade (if applicable)
+    };
+    
+    console.log(`[SERVER] Broadcasting panic ${data.type} to all clients`);
+    io.emit('panic', panicData);
+  });
 
   // handle disconnection
   socket.on('disconnect', () => {

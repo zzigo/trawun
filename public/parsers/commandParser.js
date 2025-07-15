@@ -51,11 +51,12 @@ function parseSfCommand(cmd) {
     params.maxFreq = parseFloat(freqMatch[2]);
   }
   
-  // Duration ^1
-  const durRe = /\^(\d+\.?\d*)/i;
+  // Duration ^1 or ^.1 (decimal durations)
+  const durRe = /\^(\d*\.?\d+)/i;
   const durMatch = cmd.match(durRe);
   if (durMatch) {
     params.dur = parseFloat(durMatch[1]);
+    console.log(`Parsed duration: ${durMatch[1]} → ${params.dur}s`);
   }
   
   // Count *5
@@ -110,35 +111,41 @@ window.parseCommand = function parseCommand(cmd) {
   const sf = parseSfCommand(cmd);
   if (sf) return sf;
 
-  // Sine generator with reverb: s220r, s220r9, s220^2r3
+  // Sine generator with reverb: s220r, s220r9, s220^2r3, s^.1r3
   let sMatchReverb = cmd.match(/^s(\d+)?(?:\^(\d*\.?\d+))?r(\d+)?$/i);
   if (sMatchReverb) {
     // Defaults: freq=220, dur=1, reverb=1
+    const dur = sMatchReverb[2] ? parseFloat(sMatchReverb[2]) : 1;
+    console.log(`Parsed sine+reverb duration: ${sMatchReverb[2] || '1'} → ${dur}s`);
     return {
       generator: 's',
       freq: sMatchReverb[1] ? parseFloat(sMatchReverb[1]) : 220,
-      dur: sMatchReverb[2] ? parseFloat(sMatchReverb[2]) : 1,
+      dur: dur,
       reverb: sMatchReverb[3] ? parseInt(sMatchReverb[3]) : 1
     };
   }
   
-  // Standard sine generator: s, s220, s^2, s220^2
+  // Standard sine generator: s, s220, s^2, s220^2, s^.1, s220^.01
   let sMatch = cmd.match(/^s(\d+)?(?:\^(\d*\.?\d+))?$/i);
   if (sMatch) {
     // Defaults: freq=220, dur=1
+    const dur = sMatch[2] ? parseFloat(sMatch[2]) : 1;
+    console.log(`Parsed sine duration: ${sMatch[2] || '1'} → ${dur}s`);
     return {
       generator: 's',
       freq: sMatch[1] ? parseFloat(sMatch[1]) : 220,
-      dur: sMatch[2] ? parseFloat(sMatch[2]) : 1
+      dur: dur
     };
   }
-  // Legacy: u10^2
+  // Legacy: u10^2, u10^.5
   const match = cmd.match(/([a-zA-Z]+)(\d+)\^(\d*\.?\d+)/);
   if (match) {
+    const duration = parseFloat(match[3]);
+    console.log(`Parsed legacy duration: ${match[3]} → ${duration}s`);
     return {
       generator: match[1],
       count: parseInt(match[2], 10),
-      duration: parseFloat(match[3])
+      duration: duration
     };
   }
   return null;

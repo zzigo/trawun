@@ -238,6 +238,11 @@ let meterLevel = 0;
     let commandHistory = [];
     let historyIndex = -1;
     let messages = {};
+    // Track active timers for HUD display
+    let activeTimers = {
+      window: null,   // Overall window timer (^10)
+      events: []      // Individual event timers (^1)
+    };
     // --- Pulse Visuals ---
     let pendingVisualPulses = [];
     let lastPulseTime = 0;
@@ -592,6 +597,18 @@ function drawVUMeter() {
       // Make sure synth is initialized
       if (!synth) synth = new Tone.Synth().connect(sweepFilter);
       
+      // Track messages for display
+      const messages = {};
+      
+      // Track active timers for display in HUD
+      const activeTimers = {
+        window: null,  // Overall window timer (^10)
+        events: []     // Individual event timers (^1)
+      };
+      
+      // Update timers every 100ms
+      setInterval(updateTimers, 100);
+      
       // Play a scale of notes
       const testNotes = ['C4', 'E4', 'G4', 'C5'];
       const interval = 0.2;
@@ -721,6 +738,9 @@ function drawVUMeter() {
     // Iniciar configuración de sensores al cargar
     window.addEventListener('DOMContentLoaded', () => {
       setupDeviceMotion();
+      
+      // Set up timer update interval (10 updates per second)
+      setInterval(updateTimers, 100);
     });
     
     // socket.io events
@@ -805,6 +825,86 @@ function drawVUMeter() {
           }
           
           socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+        }
+      }
+    });
+    
+    // Handle panic events from other clients
+    socket.on('panic', (data) => {
+      console.log(`Received panic ${data.type} from ${data.from}`);      
+      
+      if (data.type === 'stop') {
+        // Immediate stop
+        if (typeof Tone !== 'undefined') {
+          Tone.Transport.cancel();
+          Tone.Transport.stop();
+          if (typeof Tone.getDestination === 'function') {
+            Tone.getDestination().mute = true;
+            setTimeout(() => Tone.getDestination().mute = false, 50);
+          }
+          // Force dispose any lingering synths
+          if (sweepFilter) sweepFilter.dispose();
+          sweepFilter = new Tone.Filter({
+            frequency: 2000,
+            type: "lowpass",
+            rolloff: -12
+          }).toDestination();
+        }
+        
+        // Clear all timers
+        activeTimers.window = null;
+        activeTimers.events = [];
+        
+        // Update message and HUD
+        const sender = clients[data.from]?.name || 'another user';
+        messages[clientId] = `🛑 PANIC STOP from ${sender}`;
+        updateHUD();
+        
+      } else if (data.type === 'fade') {
+        // Fade out over specified duration
+        if (typeof Tone !== 'undefined' && typeof Tone.getDestination === 'function') {
+          const dest = Tone.getDestination();
+          const originalVolume = dest.volume.value;
+          const fadeTime = data.duration || 6000; // Default to 6 seconds
+          const fadeSteps = Math.floor(fadeTime / 100); // 10 steps per second
+          const interval = fadeTime / fadeSteps;
+          let step = 0;
+          
+          // Update message
+          const sender = clients[data.from]?.name || 'another user';
+          messages[clientId] = `🔇 PANIC FADE from ${sender}`;
+          updateHUD();
+          
+          // Fade out gradually
+          const fadeInterval = setInterval(() => {
+            step++;
+            if (step >= fadeSteps) {
+              clearInterval(fadeInterval);
+              dest.volume.value = originalVolume; // Reset for future sounds
+              Tone.Transport.cancel();
+              Tone.Transport.stop();
+              // Force dispose any lingering synths
+              if (sweepFilter) sweepFilter.dispose();
+              sweepFilter = new Tone.Filter({
+                frequency: 2000,
+                type: "lowpass",
+                rolloff: -12
+              }).toDestination();
+              
+              // Clear all timers at the end of fade out
+              activeTimers.window = null;
+              activeTimers.events = [];
+              
+              // Update message
+              messages[clientId] = `🔇 FADE COMPLETED - From ${sender}`;
+              updateHUD();
+            } else {
+              // Exponential fadeout curve
+              const fraction = 1 - (step / fadeSteps);
+              const newVolume = originalVolume - (60 * (1 - Math.pow(fraction, 3)));
+              dest.volume.value = newVolume;
+            }
+          }, interval);
         }
       }
     });
@@ -1095,6 +1195,18 @@ function drawVUMeter() {
         (typeof Tone !== 'undefined' && Tone.context ? `on (${Tone.context.state})` : 'on') : 
         'tap "start audio" to begin';
       hud += `audio: ${audioStatus}\n`;
+      
+      // Display active timers (if any)
+      if (activeTimers.window) {
+        hud += `${activeTimers.window.remaining}\n`;
+      }
+      
+      // Show individual event timers (max 3)
+      if (activeTimers.events.length > 0) {
+        const displayEvents = activeTimers.events.slice(0, 3); // Show max 3 timers
+        const eventTimes = displayEvents.map(t => t.remaining).join(' ');
+        hud += `${eventTimes}\n`;
+      }
       if (role === 'conductor') {
         hud += `commands: s220 (sine), test, audiostatus\n`;
       }
@@ -1186,15 +1298,144 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
       document.getElementById('conductorControls').style.display = audioStarted && role === 'conductor' ? 'block' : 'none';
     }
     
-    // --- Keyboard Shortcut: Ctrl+C to become conductor ---
+    // Update active timers and their countdowns
+    function updateTimers() {
+      // Update window timer if active
+      if (activeTimers.window) {
+        const now = Date.now();
+        const remaining = Math.max(0, activeTimers.window.endTime - now);
+        
+        if (remaining <= 0) {
+          // Window timer expired
+          activeTimers.window = null;
+        } else {
+          // Update countdown (in seconds, one decimal place)
+          activeTimers.window.remaining = Math.round(remaining / 100) / 10;
+        }
+      }
+      
+      // Update individual event timers
+      activeTimers.events = activeTimers.events.filter(timer => {
+        const now = Date.now();
+        const remaining = Math.max(0, timer.endTime - now);
+        
+        if (remaining <= 0) {
+          // Timer expired, remove it
+          return false;
+        } else {
+          // Update countdown (in seconds, one decimal place)
+          timer.remaining = Math.round(remaining / 100) / 10;
+          return true;
+        }
+      });
+      
+      // Update HUD if any timers are active
+      if (activeTimers.window || activeTimers.events.length > 0) {
+        updateHUD();
+      }
+    }
+    
+    // --- Keyboard Shortcuts: Ctrl+C for conductor, Alt+X/F for panic ---
     document.addEventListener('keydown', function(e) {
       // Only trigger if not typing in an input/textarea
       const active = document.activeElement;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && active && active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA') {
+      const isInputField = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      
+      // Ctrl+C becomes conductor
+      if (!isInputField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         e.preventDefault();
         socket.emit('requestConductor');
         messages[clientId] = 'Requested conductor role (via Ctrl+C)';
         updateHUD();
+        return;
+      }
+      
+      // Ctrl+X for immediate panic (stop all sounds and clear all timers)
+      if (!isInputField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        console.log('🛑 PANIC STOP - Stopping all audio and clearing timers');
+        
+        // Broadcast panic stop to all performers
+        socket.emit('panic', { type: 'stop', from: clientId, timestamp: Date.now() });
+        
+        // Terminate all audio locally
+        if (typeof Tone !== 'undefined') {
+          Tone.Transport.cancel();
+          Tone.Transport.stop();
+          if (typeof Tone.getDestination === 'function') {
+            Tone.getDestination().mute = true;
+            setTimeout(() => Tone.getDestination().mute = false, 50);
+          }
+          // Force dispose any lingering synths
+          if (sweepFilter) sweepFilter.dispose();
+          sweepFilter = new Tone.Filter({
+            frequency: 2000,
+            type: "lowpass",
+            rolloff: -12
+          }).toDestination();
+        }
+        
+        // Terminate all timers
+        activeTimers.window = null;
+        activeTimers.events = [];
+        
+        messages[clientId] = '🛑 PANIC STOP! (Ctrl+X)';
+        updateHUD();
+        return;
+      }
+      
+      // Ctrl+F for 6-second fadeout panic and clear timers when fade completes
+      if (!isInputField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        console.log('🔇 PANIC FADE - 6 second fadeout');
+        
+        // Broadcast panic fade to all performers
+        socket.emit('panic', { type: 'fade', duration: 6000, from: clientId, timestamp: Date.now() });
+        
+        if (typeof Tone !== 'undefined' && typeof Tone.getDestination === 'function') {
+          const dest = Tone.getDestination();
+          const originalVolume = dest.volume.value;
+          const fadeSteps = 60;
+          const fadeTime = 6000; // 6 seconds
+          const interval = fadeTime / fadeSteps;
+          let step = 0;
+          
+          // Fade out gradually
+          const fadeInterval = setInterval(() => {
+            step++;
+            if (step >= fadeSteps) {
+              clearInterval(fadeInterval);
+              dest.volume.value = originalVolume; // Reset for future sounds
+              Tone.Transport.cancel();
+              Tone.Transport.stop();
+              // Force dispose any lingering synths
+              if (sweepFilter) sweepFilter.dispose();
+              sweepFilter = new Tone.Filter({
+                frequency: 2000,
+                type: "lowpass",
+                rolloff: -12
+              }).toDestination();
+              
+              // Clear all timers at the end of fade out
+              activeTimers.window = null;
+              activeTimers.events = [];
+              updateHUD(); // Update HUD to reflect cleared timers
+              
+              // Update message to indicate fade completed
+              messages[clientId] = '🔇 FADE COMPLETED - All timers cleared';
+              updateHUD();
+            } else {
+              // Exponential fadeout curve feels more natural
+              const fraction = 1 - (step / fadeSteps);
+              const newVolume = originalVolume - (60 * (1 - Math.pow(fraction, 3)));
+              dest.volume.value = newVolume;
+            }
+          }, interval);
+          
+          messages[clientId] = '🔇 PANIC FADE (6s) (Ctrl+F)';
+          updateHUD();
+        }
+        return;
       }
     });
     // --- Centralized Command Parsing Integration ---
@@ -1214,9 +1455,38 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
         } else if (parsed.generator === 'sf') {
           if (role === 'conductor') {
             pendingVisualPulses.push(performance.now());
+            
+            // Create timers for display
+            const now = Date.now();
+            
+            // Track individual event duration
+            const eventDuration = parsed.dur * 1000; // Convert to milliseconds
+            
+            // Add event timer
+            activeTimers.events.push({
+              type: 'event',
+              duration: parsed.dur,
+              endTime: now + eventDuration,
+              remaining: parsed.dur
+            });
+            
+            // Track window duration if specified
+            if (parsed.window) {
+              const windowDuration = parsed.window * 1000; // Convert to milliseconds
+              
+              // Set window timer (replace any existing one)
+              activeTimers.window = {
+                type: 'window',
+                duration: parsed.window,
+                endTime: now + windowDuration,
+                remaining: parsed.window
+              };
+            }
+            
             socket.emit('generator', { type: 'sf', ...parsed, timestamp: Date.now() });
             messages[clientId] = `Sent ${trimmedCommand} to all clients`;
             updateHUD();
+            
             // Play locally for conductor
             if (audioStarted && typeof runSfGenerator === 'function') {
               runSfGenerator({ ...parsed, onTrigger: playGeneratorSound });
