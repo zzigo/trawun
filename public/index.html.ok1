@@ -1,0 +1,891 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>musical app</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'IBM Plex Mono', monospace;
+      overflow: hidden;
+    }
+    .vumeter {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 3;
+    }
+    canvas {
+      display: block;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+    }
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 2;
+      text-align: left;
+    }
+    button {
+      padding: 10px;
+      margin: 5px;
+      font-family: 'IBM Plex Mono', monospace;
+      background: rgba(0, 0, 0, 0.7);
+      color: #00ff00;
+      border: 1px solid #00ff00;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    #hud {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      color: #00ff00;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      padding: 10px;
+      z-index: 2;
+      max-width: 400px;
+      white-space: pre;
+      text-transform: lowercase;
+    }
+    #performers-hud {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      color: #00ff00;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      padding: 10px;
+      z-index: 2;
+      max-width: 400px;
+      white-space: pre;
+      text-transform: lowercase;
+      text-align: right;
+    }
+    #commandPrompt {
+      width: 100%;
+      padding: 5px;
+      margin-top: 10px;
+      background: rgba(200, 162, 200, 0.2); /* lilac */
+      color: #4169e1; /* blue */
+      border: 1px solid #4169e1;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+    }
+    #commandPrompt:focus {
+      outline: none;
+      border-color: #c8a2c8;
+    }
+    #console {
+      max-height: 100px;
+      overflow-y: auto;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #D4A5A5; /* soft pink */
+    }
+    .client-data {
+      opacity: 0.3;
+    }
+    #requestConductor {
+      position: absolute;
+      left: 0;
+    }
+     #commandPrompt {
+      width: 100%;
+      padding: 5px;
+      margin-top: 10px;
+      background: none;
+      color: #8fedf0; /* Blue */
+      border: 0px none;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+    }
+</style>
+</head>
+<body>
+  <div id="controls">
+    <div id="conductorControls" style="display:none;">
+    </div>
+    <!-- Transparent Start Audio Overlay (with QR placeholder) -->
+    <div id="startAudioOverlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1000;background:#000;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+  <div style="display:flex;flex-direction:column;align-items:center;">
+    <img src="qr.png" alt="QR code" style="width:180px;height:180px;object-fit:contain;margin-bottom:24px;filter:drop-shadow(0 0 8px #fff);background:#fff;border-radius:16px;" />
+    <span style="color:#fff;font-size:24px;">tap anywhere to start audio</span>
+  </div>
+</div>
+  </div>
+  <div id="hud">initializing...</div>
+  <div id="performers-hud"></div>
+  <script>
+    let socket = io();
+    let synth = null;
+let meterAnalyser = null;
+let meterDataArray = null;
+let meterLevel = 0;
+    let clientId, clientName, role, clients = {};
+    let audioStarted = false;
+    let commandHistory = [];
+    let historyIndex = -1;
+    let messages = {};
+    // --- Pulse Visuals ---
+    let pendingVisualPulses = [];
+    let lastPulseTime = 0;
+    let pulseActive = false;
+    let pulseAlpha = 0;
+    // --- End Pulse Visuals ---
+    
+    // initialize tone.js synth
+    // --- Start Audio Overlay Logic ---
+    async function startAudioOverlayHandler(e) {
+  // Always hide overlay on first tap, regardless of Tone.js status
+  if (e) e.stopPropagation();
+  const overlay = document.getElementById('startAudioOverlay');
+  if (overlay) overlay.style.display = 'none';
+  
+  if (typeof Tone !== 'undefined') {
+    try {
+      // On iOS/Safari we need user interaction for audio to work
+      if (/iPhone|iPad|iPod|Safari/i.test(navigator.userAgent) && !audioStarted) {
+        console.log('iOS/Safari detected, ensuring audio context starts...');
+      }
+      
+      // Ensure we await the Tone.start() call to properly initialize audio context
+      await Tone.start();
+      audioStarted = true;
+      console.log('Audio context started:', Tone.context.state);
+      
+      // Initialize synth immediately to avoid potential issues
+      if (!synth) {
+        synth = new Tone.Synth().toDestination();
+        console.log('Synth initialized');
+        
+        // Play a short test tone to confirm audio is working
+        // Use lower volume for test tone to avoid startling users
+        const testVol = new Tone.Volume(-20).toDestination();
+        const testSynth = new Tone.Synth().connect(testVol);
+        testSynth.triggerAttackRelease('C4', 0.1);
+        console.log('Test tone played');
+        
+        // Also try playing a sine wave to ensure the audio system is fully activated
+        setTimeout(() => {
+          if (synth) {
+            console.log('Playing additional test tone after 500ms...');
+            synth.triggerAttackRelease(880, 0.05);
+          }
+        }, 500);
+      }
+      
+      // Create a visual pulse to show audio is working
+      pendingVisualPulses.push(performance.now());
+      
+      // Update HUD to reflect audio status
+      updateHUD();
+    } catch (err) {
+      console.error('Error starting audio context:', err);
+      // Try to show error in HUD
+      const hud = document.getElementById('hud');
+      if (hud) {
+        hud.innerHTML += `<div style="color:red">Audio error: ${err.message}</div>`;
+      }
+    }
+  } else {
+    console.error('Tone.js not available!');
+  }
+}
+    window.addEventListener('DOMContentLoaded', () => {
+      const overlay = document.getElementById('startAudioOverlay');
+      if (overlay) {
+        overlay.addEventListener('click', startAudioOverlayHandler);
+        overlay.addEventListener('touchstart', startAudioOverlayHandler);
+      }
+    });
+    // --- End Start Audio Overlay Logic ---
+    
+    // p5.js setup
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      windowResized();
+      // Crear analyser para el master output
+      if (typeof Tone !== 'undefined' && Tone.Destination && !meterAnalyser) {
+        meterAnalyser = Tone.context.createAnalyser();
+        meterAnalyser.fftSize = 256;
+        meterDataArray = new Uint8Array(meterAnalyser.fftSize);
+        // Conectar analyser al master (API Tone.js >=14)
+        if (typeof Tone.Destination.connect === 'function') {
+          Tone.Destination.connect(meterAnalyser);
+        } else if (Tone.Destination.node && typeof Tone.Destination.node.connect === 'function') {
+          Tone.Destination.node.connect(meterAnalyser);
+        }
+      }
+    }
+    
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+    
+    function draw() {
+  // --- Pulse Visuals ---
+  const now = performance.now();
+  // Remove and trigger any pulses due now
+  while (pendingVisualPulses.length && pendingVisualPulses[0] <= now) {
+    lastPulseTime = now;
+    pulseActive = true;
+    pulseAlpha = 255; // full brightness
+    pendingVisualPulses.shift();
+  }
+  // Draw the pulse visual if active
+  if (pulseActive) {
+    fill(255, pulseAlpha);
+    noStroke();
+    ellipse(width / 2, height / 2, 200, 200); // expanding circle
+    pulseAlpha -= 10; // fade out
+    if (pulseAlpha <= 0) {
+      pulseActive = false;
+    }
+  }
+  // --- End Pulse Visuals ---
+  background(0);
+  for (let id in clients) {
+    let c = clients[id];
+    
+    // Asegurarse de que las propiedades de posición actual existen
+    if (c && c.position && typeof c.position.xNorm === 'number' && typeof c.position.yNorm === 'number') {
+      // Si no hay posición interpolada, inicializarla
+      if (!c.interpolatedPos) {
+        c.interpolatedPos = {
+          x: c.position.xNorm * windowWidth,
+          y: c.position.yNorm * windowHeight
+        };
+      }
+      
+      // Calcular posición objetivo
+      let targetX = c.position.xNorm * windowWidth;
+      let targetY = c.position.yNorm * windowHeight;
+      
+      // Interpolación suave (lerp) con factor de 0.1 (500ms aproximadamente)
+      c.interpolatedPos.x = lerp(c.interpolatedPos.x, targetX, 0.1);
+      c.interpolatedPos.y = lerp(c.interpolatedPos.y, targetY, 0.1);
+      
+      // Dibujar círculo con posición interpolada
+      fill((c && c.color) ? c.color : '#3498DB'); // fallback for color
+      noStroke();
+      ellipse(
+        c.interpolatedPos.x,
+        c.interpolatedPos.y,
+        c.role === 'conductor' ? 100 : 60,
+        c.role === 'conductor' ? 100 : 60
+      );
+      
+      // Dibujar línea entre posición actual y objetivo si están lejos
+      let distance = dist(c.interpolatedPos.x, c.interpolatedPos.y, targetX, targetY);
+      if (distance > 5) {
+        stroke(c.color || '#3498DB');
+        strokeWeight(1);
+        line(c.interpolatedPos.x, c.interpolatedPos.y, targetX, targetY);
+        noStroke();
+      }
+    }
+  }
+  
+  // Draw VU meter horizontal bar at bottom
+  drawVUMeter();
+}
+
+// Draws a horizontal VU meter at the bottom of the screen
+function drawVUMeter() {
+  if (meterAnalyser && meterDataArray) {
+    // Get current audio levels
+    meterAnalyser.getByteFrequencyData(meterDataArray);
+    
+    // Calculate average level
+    let sum = 0;
+    for (let i = 0; i < meterDataArray.length; i++) {
+      sum += meterDataArray[i];
+    }
+    const average = sum / meterDataArray.length;
+    
+    // Convert to dB scale (approximation)
+    const dB = 20 * Math.log10(average / 255 + 1e-10);
+    const level = Math.max(0, Math.min(1, (dB + 60) / 60)); // Normalize between 0 and 1
+    
+    // Draw meter background
+    noStroke();
+    fill(0, 0, 0, 180);
+    rect(0, height - 4, width, 4); // Increased height to 4px for better visibility
+    
+    // Draw meter level with color based on level
+    const meterWidth = width * level;
+    // Color gradient from green to yellow to red based on level
+    let r = level > 0.5 ? 255 : Math.floor(255 * (level * 2));
+    let g = level > 0.5 ? Math.floor(255 * (2 - level * 2)) : 255;
+    fill(r, g, 0);
+    rect(0, height - 4, meterWidth, 4);
+    
+    // Add digital readout for debugging
+    if (level > 0.01) {
+      fill(255);
+      textSize(10);
+      textAlign(LEFT);
+      text(`Audio: ${dB.toFixed(1)} dB`, 5, height - 8);
+    }
+    
+    // Update global meter level for other components to use
+    meterLevel = level;
+    
+    // Log audio level to console periodically (roughly once per second)
+    if (frameCount % 60 === 0 && level > 0.01) {
+      console.log(`[Audio Level] ${dB.toFixed(1)} dB, normalized: ${level.toFixed(3)}`);
+    }
+  }
+}
+    
+    // manual position update
+    let lastPositionUpdate = 0;
+    function updatePosition(x, y) {
+      // Verificar que las coordenadas son válidas
+      if (isNaN(x) || isNaN(y) || x === undefined || y === undefined) {
+        console.error('[updatePosition] Coordenadas inválidas:', x, y);
+        return;
+      }
+      
+      let xNorm = constrain(x / windowWidth, 0, 1);
+      let yNorm = constrain(y / windowHeight, 0, 1);
+      console.log('[updatePosition] input:', x, y, 'normalized:', xNorm, yNorm, 'window:', windowWidth, windowHeight);
+      
+      // Límite de frecuencia de actualización para evitar saturar la red
+      if (Date.now() - lastPositionUpdate > 50) { // Actualización cada 50ms máximo
+        lastPositionUpdate = Date.now();
+        
+        // Verificar que el cliente existe
+        if (!clients[clientId]) {
+          console.warn('[updatePosition] Cliente no existe:', clientId);
+          return;
+        }
+        
+        // Actualizar posición localmente
+        clients[clientId].position = { xNorm, yNorm };
+        
+        // Enviar al servidor solo si el audio está iniciado
+        if (audioStarted) {
+          let locationMsg = `${clientName}/room/${xNorm.toFixed(2)}/${yNorm.toFixed(2)}`;
+          socket.emit('location', locationMsg);
+          messages[clientId] = locationMsg;
+          console.log(`position updated: x=${x}, y=${y}, xNorm=${xNorm.toFixed(2)}, yNorm=${yNorm.toFixed(2)}`);
+          
+          // Crear un pulso visual para indicar la actualización de posición
+          pendingVisualPulses.push(performance.now());
+          
+          updateHUD();
+        } else {
+          console.log('[updatePosition] Audio no iniciado, no se envía posición al servidor');
+        }
+      }
+    }
+    
+    // Test audio system functionality
+    function testAudioSystem() {
+      if (!audioStarted) {
+        console.warn('Audio not started yet. Attempting to start...');
+        Tone.start().then(() => {
+          audioStarted = true;
+          runAudioTest();
+        }).catch(err => {
+          console.error('Failed to start audio in test:', err);
+          messages[clientId] = 'Error: ' + err.message;
+          updateHUD();
+        });
+      } else {
+        runAudioTest();
+      }
+    }
+    
+    function runAudioTest() {
+      console.log('Running audio test sequence...');
+      messages[clientId] = 'Testing audio...';
+      updateHUD();
+      
+      // Make sure synth is initialized
+      if (!synth) synth = new Tone.Synth().toDestination();
+      
+      // Play a scale of notes
+      const testNotes = ['C4', 'E4', 'G4', 'C5'];
+      const interval = 0.2;
+      
+      testNotes.forEach((note, i) => {
+        setTimeout(() => {
+          synth.triggerAttackRelease(note, 0.1);
+          console.log(`Test note ${i+1}/${testNotes.length}: ${note}`);
+          // Visual feedback
+          pendingVisualPulses.push(performance.now());
+          if (i === testNotes.length - 1) {
+            messages[clientId] = 'Audio test complete';
+            updateHUD();
+            setTimeout(() => {
+              if (messages[clientId] === 'Audio test complete') {
+                messages[clientId] = '';
+                updateHUD();
+              }
+            }, 2000);
+          }
+        }, i * interval * 1000);
+      });
+    }
+    
+    // Display detailed audio status
+    function displayAudioStatus() {
+      if (!Tone) {
+        messages[clientId] = 'Tone.js not available';
+        updateHUD();
+        return;
+      }
+      
+      const statusInfo = {
+        'Context State': Tone.context.state,
+        'Audio Started': audioStarted ? 'Yes' : 'No',
+        'Synth Initialized': synth ? 'Yes' : 'No',
+        'Sample Rate': Tone.context.sampleRate,
+        'Audio Output': meterLevel > 0.01 ? 'Active' : 'Silent',
+        'Output Level': (meterLevel * 100).toFixed(1) + '%'
+      };
+      
+      console.table(statusInfo);
+      
+      let statusMsg = 'Audio Status:\n';
+      for (const [key, value] of Object.entries(statusInfo)) {
+        statusMsg += `${key}: ${value}\n`;
+      }
+      
+      messages[clientId] = statusMsg;
+      updateHUD();
+    }
+    
+    function mousePressed() {
+      updatePosition(mouseX, mouseY);
+    }
+    
+    function touchStarted() {
+      console.log('touchStarted event fired');
+      if (touches.length > 0) {
+        updatePosition(touches[0].x, touches[0].y);
+      }
+      return false; // Prevenir comportamiento por defecto en iOS
+    }
+    
+    function touchMoved() {
+      console.log('touchMoved event fired');
+      if (touches.length > 0) {
+        updatePosition(touches[0].x, touches[0].y);
+      }
+      return false; // Prevenir comportamiento por defecto en iOS
+    }
+    
+    // sensor handling (for synth only)
+    let lastSensorUpdate = 0;
+    // Mejorar manejo de eventos de orientación para iOS
+    function setupDeviceMotion() {
+      console.log('Configurando sensores de movimiento...');
+      
+      // Manejar diferentes implementaciones de permisos (iOS 13+)
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        console.log('Dispositivo requiere permiso explícito para sensores');
+        // iOS 13+ requiere permiso explícito
+        DeviceOrientationEvent.requestPermission()
+          .then(permissionState => {
+            if (permissionState === 'granted') {
+              console.log('Permiso de sensores concedido');
+              window.addEventListener('deviceorientation', handleDeviceOrientation);
+            } else {
+              console.log('Permiso de sensores denegado');
+              messages[clientId] = 'Se requiere permiso para sensores';
+              updateHUD();
+            }
+          })
+          .catch(console.error);
+      } else {
+        // Dispositivos que no requieren permiso explícito
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
+      }
+    }
+    
+    // Manejar eventos de orientación
+    function handleDeviceOrientation(event) {
+      if (!audioStarted) return;
+      if (Date.now() - lastSensorUpdate < 100) return;
+      lastSensorUpdate = Date.now();
+      
+      // Verificar que los datos son válidos
+      if (event.beta === null || event.gamma === null) {
+        console.log('Datos de orientación no disponibles');
+        return;
+      }
+      
+      let data = { beta: event.beta, gamma: event.gamma };
+      console.log(`Sensor: beta=${data.beta?.toFixed(2)}, gamma=${data.gamma?.toFixed(2)}`);
+      
+      if (clients[clientId]) {
+        socket.emit('sensorData', data);
+      }
+      
+      if (role === 'performer' && synth) {
+        let freq = map(data.gamma, -90, 90, 200, 1000);
+        synth.set({ oscillator: { frequency: freq } });
+        synth.triggerAttackRelease(freq, '8n');
+      }
+    }
+    
+    // Iniciar configuración de sensores al cargar
+    window.addEventListener('DOMContentLoaded', () => {
+      setupDeviceMotion();
+    });
+    
+    // socket.io events
+    socket.on('init', (data) => {
+      clientId = data.id;
+      clientName = data.name || 'performer';
+      role = data.role;
+      clients = data.clients;
+      
+      console.log(`init: name=${clientName}, role=${role}, clients=${JSON.stringify(Object.keys(clients))}`);
+      
+      // Send acknowledgment back to server
+      socket.emit('client_ready', { id: clientId, audioReady: audioStarted });
+      console.log('Sent client_ready acknowledgment to server');
+      
+      updateHUD();
+    });
+    
+    socket.on('clientUpdate', (updatedClients) => {
+      clients = updatedClients;
+      console.log('[clientUpdate] clients:', clients);
+      updateHUD();
+    });
+
+    // Listen for generator events (sine commands sent to all clients)
+    socket.on('generator', (data) => {
+      console.log(`[generator] Received event:`, data);
+      
+      // Send acknowledgment of receipt back to server
+      socket.emit('generator_received', { id: clientId, dataType: data.type });
+      
+      if (data.type === 'sine') {
+        if (!audioStarted) {
+          console.warn('Audio not started. Starting audio context...');
+          // Try to start audio context on this event
+          Tone.start().then(() => {
+            audioStarted = true;
+            playGeneratorSound(data);
+            // Confirm successful playback
+            socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+          }).catch(err => {
+            console.error('Failed to auto-start audio:', err);
+            // Report failure
+            socket.emit('generator_played', { id: clientId, success: false, error: err.message });
+          });
+        } else {
+          playGeneratorSound(data);
+          // Confirm successful playback
+          socket.emit('generator_played', { id: clientId, success: true, dataType: data.type });
+        }
+      }
+    });
+    
+    // Helper function to play generator sounds
+    function playGeneratorSound(data) {
+      if (!synth) {
+        try {
+          console.log('Initializing synth...');
+          synth = new Tone.Synth().toDestination();
+        } catch (err) {
+          console.error('Failed to initialize synth:', err);
+          return;
+        }
+      }
+      
+      // Add visual feedback for audio events
+      pendingVisualPulses.push(performance.now() + 100); // Add pulse with slight delay
+      
+      try {
+        // Check if we can access the synth methods
+        if (typeof synth.triggerAttackRelease !== 'function') {
+          console.error('Synth.triggerAttackRelease is not a function!');
+          messages[clientId] = 'Error: Invalid synth';
+          updateHUD();
+          return;
+        }
+        
+        // Play the sound
+        console.log(`Reproduciendo: ${data.freq}Hz por ${data.dur}s`);
+        synth.triggerAttackRelease(data.freq, data.dur);
+        messages[clientId] = `s${data.freq}^${data.dur}`;
+        console.log(`[sine] generator event played: ${data.freq}Hz for ${data.dur}s`);
+        
+        // Añadir un pulso visual para mostrar que se está reproduciendo el sonido
+        document.body.style.boxShadow = 'inset 0 0 20px rgba(0,255,0,0.5)';
+        setTimeout(() => {
+          document.body.style.boxShadow = 'none';
+        }, 100);
+      } catch (err) {
+        console.error('Error playing sound:', err);
+        messages[clientId] = `Error: ${err.message}`;
+      }
+      updateHUD();
+    }
+    
+    socket.on('control', (data) => {
+      if (role === 'performer' && audioStarted) {
+        if (data.type === 'freq') {
+          if (!synth) synth = new Tone.Synth().toDestination();
+          synth.set({ oscillator: { frequency: data.value } });
+          synth.triggerAttackRelease(data.value, '8n');
+          messages[clientId] = `freq ${data.value}`;
+        } else if (data.type === 'sine') {
+          if (!synth) synth = new Tone.Synth().toDestination();
+          synth.triggerAttackRelease(data.freq, data.dur);
+          messages[clientId] = `s${data.freq}^${data.dur}`;
+          console.log(`[sine] Remote: ${data.freq}Hz for ${data.dur}s`);
+        }
+      }
+    });
+    
+    function sendControl(data) {
+      if (role === 'conductor' && audioStarted) {
+        socket.emit('conductorControl', data);
+      } else if (role === 'performer' && audioStarted) {
+        if (data.type === 'sine') {
+          if (!synth) synth = new Tone.Synth().toDestination();
+          synth.triggerAttackRelease(data.freq, data.dur);
+          console.log(`[sine] Local: ${data.freq}Hz for ${data.dur}s`);
+        }
+      }
+    }
+    
+    function updateHUD() {
+      // Debug: log all clients
+      console.log('[updateHUD] clients:', clients);
+
+      // main HUD (lower-left)
+      let hud = `name: ${clientName.toLowerCase()}\n`; 
+      hud += `role: ${role ? role.toLowerCase() : 'performer'}\n`; 
+      const audioStatus = audioStarted ? 
+        (typeof Tone !== 'undefined' && Tone.context ? `on (${Tone.context.state})` : 'on') : 
+        'tap "start audio" to begin';
+      hud += `audio: ${audioStatus}\n`;
+      if (role === 'conductor') {
+        hud += `commands: s220 (sine), test, audiostatus\n`;
+      }
+      if (clients[clientId] && clients[clientId].sensorData) {
+        hud += `beta: ${clients[clientId].sensorData.beta?.toFixed(2) || 'n/a'}\n`;
+        hud += `gamma: ${clients[clientId].sensorData.gamma?.toFixed(2) || 'n/a'}\n`;
+      }
+      if (clients[clientId] && clients[clientId].position) {
+        hud += `position: ${clientName}/room/${clients[clientId].position.xNorm?.toFixed(2) || '0.50'}/${clients[clientId].position.yNorm?.toFixed(2) || '0.50'}\n`;
+      }
+      document.getElementById('hud').innerHTML = hud;
+      
+      // performers HUD (upper-right)
+      let performersHud = `performers: ${Object.keys(clients).length}\n`;
+      for (let id in clients) {
+        let c = clients[id];
+        if (!id || !c || !c.name || !c.color || !c.position || typeof c.position.xNorm !== 'number' || typeof c.position.yNorm !== 'number') {
+          continue;
+        }
+        let isConductor = c.role === 'conductor';
+        let name = c.name;
+        let color = c.color;
+        let coords = `x: ${c.position.xNorm.toFixed(2)}, y: ${c.position.yNorm.toFixed(2)}`;
+        let msg = messages[id] ? `<span style="color:#fff;opacity:0.8;font-size:13px;">${messages[id]}</span>` : '';
+        performersHud += `${isConductor ? '<span style="color:#ff2222;font-weight:bold;margin-right:6px;">C</span> ' : ''}`;
+        performersHud += `<span style="color: ${color};">${name.toLowerCase()}</span> <span class="client-data" style="color: ${color}; opacity: 0.3;">${coords}</span> ${msg}\n`;
+      }
+      document.getElementById('performers-hud').innerHTML = performersHud;
+      
+      // command prompt for conductor
+      let promptDiv = document.getElementById('commandPrompt');
+      if (!promptDiv) {
+        let input = document.createElement('input');
+        input.id = 'commandPrompt';
+        input.type = 'text';
+        input.placeholder = 'enter command (s200 u10^2)'; // lowercase, already correct
+        document.getElementById('hud').appendChild(input);
+        document.addEventListener('keydown', function(e) {
+          // Only focus prompt if not already in an input/textarea and not with modifiers
+          if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+            let prompt = document.getElementById('commandPrompt');
+            if (prompt) {
+              prompt.focus();
+              e.preventDefault();
+            }
+          }
+        });
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            let command = input.value.trim();
+            if (command) {
+              commandHistory.unshift(command);
+              historyIndex = -1;
+              evaluateCommand(command);
+              input.value = '';
+            }
+          } else if (e.key === 'ArrowUp') {
+            if (historyIndex < commandHistory.length - 1) {
+              historyIndex++;
+              input.value = commandHistory[historyIndex];
+            }
+          } else if (e.key === 'ArrowDown') {
+            if (historyIndex > -1) {
+              historyIndex--;
+              input.value = historyIndex === -1 ? '' : commandHistory[historyIndex];
+            }
+          }
+        });
+      }
+      
+      document.getElementById('conductorControls').style.display = audioStarted && role === 'conductor' ? 'block' : 'none';
+    }
+    
+    function evaluateCommand(command) {
+      const trimmedCommand = command.trim();
+      console.log(`[command] Evaluating: "${trimmedCommand}"`);
+      
+      // Test audio command
+      if (trimmedCommand.toLowerCase() === 'testaudio' || trimmedCommand.toLowerCase() === 'test') {
+        console.log('[command] Testing audio...');
+        testAudioSystem();
+        return;
+      }
+      
+      // Check if this is just 's' command (sine with defaults)
+      if (trimmedCommand.toLowerCase() === 's') {
+        console.log('[command] Simple sine command detected');
+        processSineCommand(220, 1); // Use defaults
+        return;
+      }
+      
+      // Conductor role request
+      if (trimmedCommand.toLowerCase() === 'conductor') {
+        socket.emit('requestConductor');
+        console.log('[role] Requesting conductor role...');
+        return;
+      }
+      
+      // Sine generator with parameters: s220, s^2, s220^2
+      const sMatch = trimmedCommand.match(/^s(\d+)?(?:\^(\d*\.?\d+))?$/i);
+      if (sMatch) {
+        const freq = sMatch[1] ? parseFloat(sMatch[1]) : 220;
+        const dur = sMatch[2] ? parseFloat(sMatch[2]) : 1;
+        
+        console.log(`[command] Parsed sine command: freq=${freq}, dur=${dur}`);
+        processSineCommand(freq, dur);
+        return;
+      }
+      
+      // Audio status command
+      if (trimmedCommand.toLowerCase() === 'audiostatus') {
+        console.log('[command] Checking audio status');
+        displayAudioStatus();
+        return;
+      }
+      
+      // Other commands (freq, circle, etc)
+      let parts = trimmedCommand.split(' ');
+      if (parts[0] === 'freq' && parts[1]) {
+        let freq = parseFloat(parts[1]);
+        if (!isNaN(freq)) {
+          sendControl({ type: 'freq', value: freq });
+        }
+      } else if (parts[0] === 'circle') {
+        let clientIds = Object.keys(clients);
+        clientIds.forEach((id, index) => {
+          setTimeout(() => {
+            if (clients[id].role === 'performer') {
+              sendControl({ type: 'freq', value: 200 + (index * 100), target: id });
+            }
+          }, index * 500);
+        });
+      } else {
+        console.log(`[command] Unknown command: ${trimmedCommand}`);
+        messages[clientId] = `Unknown command: ${trimmedCommand}`;
+        updateHUD();
+      }
+    }
+    
+    // Helper function to process sine commands
+    function processSineCommand(freq, dur) {
+      if (role === 'conductor') {
+        // Visual feedback that command was received
+        pendingVisualPulses.push(performance.now());
+        
+        // Send to all clients via the server
+        socket.emit('generator', { type: 'sine', freq, dur, timestamp: Date.now() });
+        console.log(`[sine] Sent sine: ${freq}Hz for ${dur}s to all`);
+        messages[clientId] = `Sent s${freq}^${dur} to all clients`;
+        updateHUD();
+        
+        // Also play locally for the conductor
+        if (audioStarted) {
+          if (!synth) synth = new Tone.Synth().toDestination();
+          try {
+            synth.triggerAttackRelease(freq, dur);
+            console.log(`[sine] Conductor local playback: ${freq}Hz for ${dur}s`);
+          } catch (err) {
+            console.error('Error playing conductor local sound:', err);
+          }
+        } else {
+          console.warn('Audio not started for conductor');
+          // Try to start audio
+          Tone.start().then(() => {
+            audioStarted = true;
+            if (!synth) synth = new Tone.Synth().toDestination();
+            synth.triggerAttackRelease(freq, dur);
+            console.log('Started audio and played sound');
+            updateHUD();
+          }).catch(err => console.error('Failed to start audio:', err));
+        }
+      } else {
+        console.log(`[command] Not a conductor, can't broadcast commands`);
+      }
+    }
+    
+
+    
+    // request sensor permission (iOS)
+    function setupDeviceMotion() {
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(permissionState => {
+          if (permissionState === 'granted') {
+            console.log('sensor permission granted');
+          } else {
+            console.log('sensor permission denied');
+          }
+        }).catch(err => {
+          console.log('sensor permission error: ' + err);
+        });
+      }
+    }
+    
+    // error boundary
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      console.log(`error: ${msg} at ${url}:${lineNo}`);
+        return false;
+      };
+    // Ensure all script blocks are closed
+    </script>
+  </body>
+</html>
