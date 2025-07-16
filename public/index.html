@@ -252,7 +252,7 @@
   <!-- README Modal -->
   <div id="readmeModal" class="modal-overlay">
     <div class="modal-content">
-      <span class="modal-close">&times;</span>
+      <span class="modal-close" onclick="closeReadmeModal()">&times;</span>
       <h1>trawun v1.2.0</h1>
       
       <!-- Quick Reference Section -->
@@ -300,11 +300,7 @@
     </div>
   </div>
   
-  <div id="startAudioOverlay">
-    <div id="startAudioContent">
-      <h2>click to start audio</h2>
-    </div>
-  </div>  
+  <!-- Audio overlay moved to a single instance below -->
   <div id="controls">
     <div id="conductorControls" style="display:none;">
     </div>
@@ -492,8 +488,12 @@ let meterLevel = 0;
     async function startAudioOverlayHandler(e) {
   // Always hide overlay on first tap, regardless of Tone.js status
   if (e) e.stopPropagation();
-  const overlay = document.getElementById('startAudioOverlay');
-  if (overlay) overlay.style.display = 'none';
+  
+  // Find and hide ALL overlays with this ID (fixes duplicate issue)
+  const overlays = document.querySelectorAll('#startAudioOverlay');
+  overlays.forEach(overlay => {
+    if (overlay) overlay.style.display = 'none';
+  });
   
   if (typeof Tone !== 'undefined') {
     try {
@@ -1582,7 +1582,7 @@ function drawVUMeter() {
       document.getElementById('hud').innerHTML = hud;
       
       // performers HUD (upper-right)
-      let performersHud = `<span class="version-link" onclick="toggleReadmeModal()">trawun v${TRAWUN_VERSION}</span>
+      let performersHud = `<span class="version-link" onclick="toggleReadmeModal(); console.log('Version link clicked');">trawun v${TRAWUN_VERSION}</span>
 `;
       performersHud += `performers: ${Object.keys(clients).length}
 `;
@@ -2061,13 +2061,22 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
     
     // README modal functions
     function toggleReadmeModal() {
+      console.log('toggleReadmeModal called');
       const modal = document.getElementById('readmeModal');
+      console.log('Modal element:', modal);
+      
       if (modal) {
+        // Force display to be explicitly set either way
         if (modal.style.display === 'block') {
-          closeReadmeModal();
+          console.log('Modal is currently visible, hiding it');
+          modal.style.display = 'none';
         } else {
-          openReadmeModal();
+          console.log('Modal is currently hidden, showing it');
+          modal.style.display = 'block';
+          populateReadmeContent();
         }
+      } else {
+        console.error('README modal element not found!');
       }
     }
     
