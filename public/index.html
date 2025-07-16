@@ -2025,6 +2025,177 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
       console.log(`error: ${msg} at ${url}:${lineNo}`);
         return false;
       };
+    // HUD visibility toggle function
+    function toggleHudVisibility() {
+      hudVisible = !hudVisible;
+      
+      // Elements to toggle
+      const hudElements = [
+        document.getElementById('hud'),
+        document.getElementById('performers-hud')
+      ];
+      
+      // Toggle visibility for each element
+      hudElements.forEach(el => {
+        if (el) {
+          el.style.display = hudVisible ? 'block' : 'none';
+        }
+      });
+      
+      // Show brief message
+      if (hudVisible) {
+        messages[clientId] = 'HUD elements visible';
+      } else {
+        messages[clientId] = 'HUD hidden (press Ctrl+Shift+H to restore)';
+        // Brief flash message then clear it
+        setTimeout(() => {
+          if (!hudVisible) {
+            messages[clientId] = '';
+            updateHUD();
+          }
+        }, 2000);
+      }
+      
+      updateHUD();
+    }
+    
+    // README modal functions
+    function toggleReadmeModal() {
+      const modal = document.getElementById('readmeModal');
+      if (modal) {
+        if (modal.style.display === 'block') {
+          closeReadmeModal();
+        } else {
+          openReadmeModal();
+        }
+      }
+    }
+    
+    function openReadmeModal() {
+      const modal = document.getElementById('readmeModal');
+      if (modal) {
+        modal.style.display = 'block';
+        populateReadmeContent();
+      }
+    }
+    
+    function closeReadmeModal() {
+      const modal = document.getElementById('readmeModal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+    }
+    
+    // Populate README content from README.md
+    function populateReadmeContent() {
+      const contentDiv = document.getElementById('readmeContent');
+      if (!contentDiv) return;
+      
+      // Add formatted README content
+      contentDiv.innerHTML = `
+        <h1>Trawun</h1>
+        
+        <p>Trawun is a networked real-time music performance system designed for distributed cognition and collaborative sound synthesis. It uses WebSockets to connect multiple performers together, each contributing to a shared sonic environment through a minimalist text-based syntax called SYNO.</p>
+        
+        <h2>System Architecture</h2>
+        
+        <p>Built on a client-server architecture using:</p>
+        
+        <ul>
+          <li><strong>Backend</strong>: Express.js with Socket.io for real-time communication</li>
+          <li><strong>Frontend</strong>: HTML5, JavaScript with Tone.js for audio synthesis and p5.js for visualization</li>
+          <li><strong>Communication Protocol</strong>: WebSockets via Socket.io</li>
+          <li><strong>Sound Engine</strong>: Tone.js for real-time audio synthesis and processing</li>
+        </ul>
+        
+        <h3>Core Design Patterns</h3>
+        
+        <p>The architecture follows several key design patterns:</p>
+        
+        <ul>
+          <li><strong>Observer Pattern</strong>: The renderer listens to audio state changes and updates the UI</li>
+          <li><strong>Composite Pattern</strong>: The audio system walks the AST node tree for sound generation</li>
+          <li><strong>Factory Method</strong>: Creates audio nodes from parsed SYNO commands</li>
+          <li><strong>Command Pattern</strong>: Schedules parameter transitions as commands</li>
+          <li><strong>Facade Pattern</strong>: Main entry point orchestrates parser, audio, and renderer modules</li>
+        </ul>
+        
+        <h2>SYNO Language Reference</h2>
+        
+        <p>SYNO is a terse, energy-efficient language designed for live coding music. It emphasizes minimalism while allowing complex sound generation and manipulation.</p>
+        
+        <h3>Syntax Philosophy</h3>
+        
+        <ul>
+          <li><strong>Characters</strong>: Generators and processors</li>
+          <li><strong>Numbers</strong>: Parameter values</li>
+          <li><strong>Parentheses</strong>: Nested operations</li>
+          <li><strong>Order-Independence</strong>: Parameter order doesn't matter (e.g., <code>sf100-500v1p?</code> = <code>sf100-500p?v1</code>)</li>
+        </ul>
+        
+        <h3>Sound Generators</h3>
+        
+        <h4>Basic Sine Wave (<code>s</code>)</h4>
+        
+        <pre><code>s                    # 220 Hz sine wave, default duration
+s440                 # 440 Hz sine wave
+s220^2               # 220 Hz sine for 2 seconds
+s100>300'10         # Sweep 100 to 300 Hz in 10 seconds
+s440v5              # 440 Hz sine at volume 5
+s440p1              # 440 Hz sine panned right</code></pre>
+        
+        <h4>Sine Fade Cloud (<code>sf</code>)</h4>
+        
+        <pre><code>sf                   # Default sine fade cloud (20-440Hz range, 5 tones, 10s window)
+sf100-500            # Random frequencies between 100-500Hz
+sf100-500^1*5v1)^10 # 5 tones between 100-500Hz, each 1s, spread over 10s window, volume 1
+sf20-440^1*5v1p?    # Same but with random panning</code></pre>
+      `;
+      
+      // Initialize modal events
+      initModalEvents();
+    }
+    
+    function initModalEvents() {
+      // Close button event
+      const closeBtn = document.querySelector('.modal-close');
+      if (closeBtn) {
+        closeBtn.onclick = closeReadmeModal;
+      }
+      
+      // Click outside modal to close
+      const modal = document.getElementById('readmeModal');
+      if (modal) {
+        modal.onclick = function(event) {
+          if (event.target === modal) {
+            closeReadmeModal();
+          }
+        };
+      }
+      
+      // ESC key to close modal
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          closeReadmeModal();
+        }
+      });
+    }
+    
+    // Initialize when page loads
+    window.addEventListener('DOMContentLoaded', function() {
+      // Initialize modal events
+      initModalEvents();
+      
+      // Update document title with version
+      document.title = `trawun v${TRAWUN_VERSION}`;
+      
+      // Update modal title with version
+      const modalTitle = document.querySelector('.modal-content h1');
+      if (modalTitle) {
+        modalTitle.textContent = `trawun v${TRAWUN_VERSION}`;
+      }
+    });
+    
     // Ensure all script blocks are closed
     </script>
 
