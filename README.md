@@ -4,7 +4,7 @@ Trawun is a networked real-time music performance system designed for distribute
 
 ## System Architecture
 
-Trawun is built on a client-server architecture using:
+Bbuilt on a client-server architecture using:
 
 - **Backend**: Express.js with Socket.io for real-time communication
 - **Frontend**: HTML5, JavaScript with Tone.js for audio synthesis and p5.js for visualization
