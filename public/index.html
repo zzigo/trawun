@@ -91,10 +91,24 @@
       border: 1px solid #4169e1;
       font-family: 'IBM Plex Mono', monospace;
       font-size: 14px;
+      z-index: 9999; /* Ensure prompt is always on top */
+      position: relative; /* Required for z-index to work */
     }
     #commandPrompt:focus {
       outline: none;
       border-color: #c8a2c8;
+      background: rgba(200, 162, 200, 0.4); /* Stronger background when focused */
+    }
+    
+    /* Visual indicator when prompt is ready for input */
+    #commandPrompt.ready {
+      animation: pulse-border 2s infinite;
+    }
+    
+    @keyframes pulse-border {
+      0% { border-color: #4169e1; }
+      50% { border-color: #c8a2c8; }
+      100% { border-color: #4169e1; }
     }
     #console {
       max-height: 100px;
@@ -236,6 +250,7 @@ let meterLevel = 0;
     let clientId, clientName, role, clients = {};
     let audioStarted = false;
     let lastCommand = null;
+    let lastCommandExecuted = null; // Track last executed command for chaining
     let commandHistory = [];
     let historyIndex = -1;
     let messages = {};
@@ -1435,15 +1450,37 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
         let input = document.createElement('input');
         input.id = 'commandPrompt';
         input.type = 'text';
-        input.placeholder = 'enter command (s200 u10^2)'; // lowercase, already correct
+        input.placeholder = 'press i for command input / space for next sound (s200 u10^2)'; 
+        input.classList.add('ready');
         document.getElementById('hud').appendChild(input);
+        
+        // Enhanced keyboard shortcuts
         document.addEventListener('keydown', function(e) {
+          // IMPORTANT: Always allow command entry regardless of audio state
           // Only focus prompt if not already in an input/textarea and not with modifiers
-          if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+          if ((e.key === 'i' || e.key === ' ') && 
+              !e.ctrlKey && !e.metaKey && !e.altKey && 
+              document.activeElement.tagName !== 'INPUT' && 
+              document.activeElement.tagName !== 'TEXTAREA') {
+            
             let prompt = document.getElementById('commandPrompt');
             if (prompt) {
+              // Add visual feedback
+              prompt.classList.add('ready');
               prompt.focus();
-              e.preventDefault();
+              
+              // For space key, prepare to chain commands
+              if (e.key === ' ') {
+                // Prevent default space bar scrolling
+                e.preventDefault();
+                
+                // Auto-append a '+' to chain with previous command if the field is empty
+                if (prompt.value.trim() === '' && lastCommandExecuted) {
+                  prompt.value = '+';  // Chain command indicator
+                }
+              } else {
+                e.preventDefault();
+              }
             }
           }
         });
@@ -1451,10 +1488,34 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
           if (e.key === 'Enter') {
             let command = input.value.trim();
             if (command) {
+              // Process command chaining using + symbol
+              if (command.startsWith('+') && lastCommandExecuted) {
+                // Get frequency and duration from last command
+                let parts = lastCommandExecuted.match(/^s(\d+)\s*(\d*)/);
+                if (parts) {
+                  let lastFreq = parts[1];
+                  // Replace + with the actual command
+                  command = command.replace('+', 's' + lastFreq + ' ');
+                }
+              }
+              
+              // Add to history and reset index
               commandHistory.unshift(command);
               historyIndex = -1;
+              
+              // Execute command but keep input focused for rapid input
               evaluateCommand(command);
-              input.value = '';
+              
+              // Don't clear input if holding shift (for rapid command chains)
+              if (!e.shiftKey) {
+                input.value = '';
+              } else {
+                input.value = '+';
+                input.select();
+              }
+              
+              // Ensure prompt stays active for next command
+              setTimeout(() => input.focus(), 50);
             }
           } else if (e.key === 'ArrowUp') {
             if (historyIndex < commandHistory.length - 1) {
@@ -1465,6 +1526,12 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
             if (historyIndex > -1) {
               historyIndex--;
               input.value = historyIndex === -1 ? '' : commandHistory[historyIndex];
+            }
+          } else if (e.key === 'Tab') {
+            // Quick command chaining with Tab key
+            e.preventDefault();
+            if (lastCommandExecuted) {
+              input.value = '+';
             }
           }
         });
@@ -1614,10 +1681,17 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
       }
     });
     // --- Centralized Command Parsing Integration ---
-    // Import parseCommand from parsers/commandParser.js at the top of your script:
-    // (if using modules)
-    // For inlined/legacy, ensure parseCommand is available globally.
     function evaluateCommand(command) {
+      console.log('evaluateCommand:', command);
+      lastCommand = command;
+      
+      // For polyphonic sound generation - track successful command execution
+      // This will be used for command chaining with '+'  
+      lastCommandExecuted = command;
+      
+      // Basic validation
+      if (!command || typeof command !== 'string') return;
+      
       const trimmedCommand = command.trim();
       console.log(`[command] Evaluating: "${trimmedCommand}"`);
 
