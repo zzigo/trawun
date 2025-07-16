@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>musical app</title>
+  <title>trawun v1.2.0</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
@@ -110,6 +110,118 @@
       50% { border-color: #c8a2c8; }
       100% { border-color: #4169e1; }
     }
+    /* Modal dialog styles */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.8);
+      transition: opacity 0.3s ease;
+    }
+    
+    .modal-content {
+      position: relative;
+      background-color: rgba(0,0,0,0.9);
+      color: #00ff00;
+      margin: 5% auto;
+      padding: 20px;
+      border: 1px solid #00ff00;
+      width: 85%;
+      max-width: 900px;
+      max-height: 80vh;
+      overflow-y: auto;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+    }
+    
+    .modal-close {
+      color: #00ff00;
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    
+    .modal-content h1 {
+      color: #00ff00;
+      font-size: 24px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #00ff00;
+      padding-bottom: 10px;
+    }
+    
+    .modal-content h2 {
+      color: #00ff00;
+      font-size: 20px;
+      margin-top: 20px;
+      margin-bottom: 10px;
+    }
+    
+    .modal-content h3 {
+      color: #00ff00;
+      font-size: 16px;
+      margin-top: 15px;
+      margin-bottom: 8px;
+    }
+    
+    .modal-content pre {
+      background-color: rgba(0,0,0,0.5);
+      border: 1px solid #2a2a2a;
+      padding: 10px;
+      overflow-x: auto;
+      color: #ffffff;
+    }
+    
+    .modal-content code {
+      font-family: 'IBM Plex Mono', monospace;
+      color: #c8a2c8;
+    }
+    
+    .version-link {
+      color: #c8a2c8;
+      text-decoration: none;
+      cursor: pointer;
+      font-size: 12px;
+      opacity: 0.7;
+      transition: opacity 0.2s ease;
+    }
+    
+    .version-link:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    
+    /* Quick reference section for essential commands */
+    .quick-reference {
+      margin-bottom: 20px;
+      padding: 10px;
+      background-color: rgba(200, 162, 200, 0.1);
+      border-left: 3px solid #c8a2c8;
+    }
+    
+    .keyboard-shortcuts {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px 15px;
+    }
+    
+    .keyboard-shortcut-key {
+      background-color: rgba(0,0,0,0.5);
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 2px 5px;
+      display: inline-block;
+      margin-right: 5px;
+      font-size: 12px;
+    }
+    
     #console {
       max-height: 100px;
       overflow-y: auto;
@@ -137,6 +249,62 @@
 </style>
 </head>
 <body>
+  <!-- README Modal -->
+  <div id="readmeModal" class="modal-overlay">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <h1>trawun v1.2.0</h1>
+      
+      <!-- Quick Reference Section -->
+      <div class="quick-reference">
+        <h2>Essential Generators</h2>
+        <ul>
+          <li><code>s440</code> - Sine wave at 440 Hz</li>
+          <li><code>s440^2</code> - Sine wave at 440 Hz for 2 seconds</li>
+          <li><code>s440v5</code> - Sine wave with volume 0.5</li>
+          <li><code>sf100-500</code> - Sine fade cloud between 100-500 Hz</li>
+          <li><code>sf100-500^1*5v1</code> - 5 sine tones between 100-500 Hz, 1 sec each</li>
+          <li><code>n1^3</code> - Grey noise for 3 seconds</li>
+        </ul>
+        
+        <h2>Keyboard Shortcuts</h2>
+        <div class="keyboard-shortcuts">
+          <div><span class="keyboard-shortcut-key">i</span></div>
+          <div>Focus command prompt</div>
+          
+          <div><span class="keyboard-shortcut-key">Space</span></div>
+          <div>Focus prompt for command chaining</div>
+          
+          <div><span class="keyboard-shortcut-key">Shift</span>+<span class="keyboard-shortcut-key">Enter</span></div>
+          <div>Execute command and keep prompt focused</div>
+          
+          <div><span class="keyboard-shortcut-key">Tab</span></div>
+          <div>Quick command chaining with previous frequency</div>
+          
+          <div><span class="keyboard-shortcut-key">Ctrl</span>+<span class="keyboard-shortcut-key">X</span></div>
+          <div>Panic stop (all sounds)</div>
+          
+          <div><span class="keyboard-shortcut-key">Ctrl</span>+<span class="keyboard-shortcut-key">F</span></div>
+          <div>Panic fade out (6 seconds)</div>
+          
+          <div><span class="keyboard-shortcut-key">Ctrl</span>+<span class="keyboard-shortcut-key">Shift</span>+<span class="keyboard-shortcut-key">H</span></div>
+          <div>Toggle HUD visibility</div>
+          
+          <div><span class="keyboard-shortcut-key">Double-click</span></div>
+          <div>Toggle fullscreen mode</div>
+        </div>
+      </div>
+      
+      <!-- Full README content will be loaded here -->
+      <div id="readmeContent"></div>
+    </div>
+  </div>
+  
+  <div id="startAudioOverlay">
+    <div id="startAudioContent">
+      <h2>click to start audio</h2>
+    </div>
+  </div>  
   <div id="controls">
     <div id="conductorControls" style="display:none;">
     </div>
@@ -248,12 +416,16 @@ let meterAnalyser = null;
 let meterDataArray = null;
 let meterLevel = 0;
     let clientId, clientName, role, clients = {};
+    // Version tracking
+    const TRAWUN_VERSION = '1.2.0';
+    
     let audioStarted = false;
     let lastCommand = null;
     let lastCommandExecuted = null; // Track last executed command for chaining
     let commandHistory = [];
     let historyIndex = -1;
     let messages = {};
+    let hudVisible = true; // Track HUD visibility state
     // Track active timers for HUD display
     let activeTimers = {
       window: null,   // Overall window timer (^10)
@@ -1410,7 +1582,10 @@ function drawVUMeter() {
       document.getElementById('hud').innerHTML = hud;
       
       // performers HUD (upper-right)
-      let performersHud = `performers: ${Object.keys(clients).length}\n`;
+      let performersHud = `<span class="version-link" onclick="toggleReadmeModal()">trawun v${TRAWUN_VERSION}</span>
+`;
+      performersHud += `performers: ${Object.keys(clients).length}
+`;
       for (let id in clients) {
         let c = clients[id];
         if (!id || !c || !c.name || !c.color || !c.position || typeof c.position.xNorm !== 'number' || typeof c.position.yNorm !== 'number') {
@@ -1581,10 +1756,37 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
     document.addEventListener('keydown', function(e) {
       // Only trigger if not typing in an input/textarea
       const active = document.activeElement;
-      const isInputField = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      const isInputActive = active.tagName === 'INPUT' || active.tagName === 'TEXTAREA';
+      if (isInputActive) return;
+      
+      // Ctrl+X for immediate panic (stop all sounds and clear all timers)
+      if (!isInputActive && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        console.log('🛑 PANIC STOP - Stopping all audio and clearing timers');
+        
+        socket.emit('panic', { type: 'stop', from: clientId });
+        return;
+      }
+      
+      // Ctrl+F for fade-out panic (gradually fade out all sounds)
+      if (!isInputActive && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        console.log('🔉 PANIC FADE - Fading out all audio');
+        
+        socket.emit('panic', { type: 'fade', from: clientId });
+        return;
+      }
+      
+      // Ctrl+Shift+H for toggling HUD visibility
+      if (!isInputActive && e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        console.log('👁️ Toggling HUD visibility');
+        toggleHudVisibility();
+        return;
+      }
       
       // Ctrl+C becomes conductor
-      if (!isInputField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      if (!isInputActive && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         e.preventDefault();
         socket.emit('requestConductor');
         messages[clientId] = 'Requested conductor role (via Ctrl+C)';
@@ -1593,7 +1795,7 @@ performersHud += `</span> <span class="client-data" style="color: ${color}; opac
       }
       
       // Ctrl+X for immediate panic (stop all sounds and clear all timers)
-      if (!isInputField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+      if (!isInputActive && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
         e.preventDefault();
         console.log('🛑 PANIC STOP - Stopping all audio and clearing timers');
         
