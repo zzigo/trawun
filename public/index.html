@@ -235,6 +235,7 @@ let meterDataArray = null;
 let meterLevel = 0;
     let clientId, clientName, role, clients = {};
     let audioStarted = false;
+    let lastCommand = null;
     let commandHistory = [];
     let historyIndex = -1;
     let messages = {};
@@ -243,6 +244,55 @@ let meterLevel = 0;
       window: null,   // Overall window timer (^10)
       events: []      // Individual event timers (^1)
     };
+    
+    // Safety mechanism for rapid sound triggering
+    let soundSafetyMonitor = {
+      recentSounds: [],         // Array of timestamps of recent sound events
+      maxSoundsWindow: 1000,    // Time window in ms to check for rapid sounds
+      maxSoundsThreshold: 10,   // Maximum allowed sounds in window before safety triggers
+      safetyEngaged: false,     // Whether safety panic has been triggered
+      mobileThreshold: 5,       // Lower threshold for mobile devices
+      mobileDetected: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+      lastWarningTime: 0,       // Last time a warning was shown
+      cautionShown: false       // Whether initial caution has been shown
+    };
+    
+    // Check if sounds are being triggered too rapidly
+    function checkSoundSafety() {
+      const now = Date.now();
+      
+      // Filter out old events outside our window
+      soundSafetyMonitor.recentSounds = soundSafetyMonitor.recentSounds.filter(
+        time => now - time < soundSafetyMonitor.maxSoundsWindow
+      );
+      
+      // Use lower threshold for mobile devices
+      const threshold = soundSafetyMonitor.mobileDetected ? 
+                       soundSafetyMonitor.mobileThreshold : 
+                       soundSafetyMonitor.maxSoundsThreshold;
+      
+      // If too many sounds in our window, trigger safety
+      if (soundSafetyMonitor.recentSounds.length > threshold && !soundSafetyMonitor.safetyEngaged) {
+        console.warn(`Sound safety triggered! ${soundSafetyMonitor.recentSounds.length} sounds in ${soundSafetyMonitor.maxSoundsWindow}ms`);
+        
+        // Engage safety
+        soundSafetyMonitor.safetyEngaged = true;
+        
+        // Send panic stop to all clients
+        socket.emit('panic', { type: 'stop', auto: true });
+        
+        // Update local interface
+        messages[clientId] = `🚨 AUTO-SAFETY: Sound loop detected and stopped`;
+        updateHUD();
+        
+        // Reset safety after a cooling period
+        setTimeout(() => {
+          soundSafetyMonitor.safetyEngaged = false;
+          soundSafetyMonitor.recentSounds = [];
+        }, 2000);
+      }
+    }
+    
     // --- Pulse Visuals ---
     let pendingVisualPulses = [];
     let lastPulseTime = 0;
@@ -282,13 +332,40 @@ let meterLevel = 0;
         testSynth.triggerAttackRelease('C4', 0.1);
         console.log('Test tone played');
         
+        // Don't track these initialization sounds in the safety monitor
+        if (soundSafetyMonitor) {
+          soundSafetyMonitor._testMode = true;
+        }
+        
         // Also try playing a sine wave to ensure the audio system is fully activated
         setTimeout(() => {
           if (synth) {
             console.log('Playing additional test tone after 500ms...');
             synth.triggerAttackRelease(880, 0.05);
           }
+          
+          // Turn off test mode after startup
+          if (soundSafetyMonitor) {
+            setTimeout(() => {
+              soundSafetyMonitor._testMode = false;
+              console.log('Sound safety monitor test mode disabled');
+            }, 500);
+          }
         }, 500);
+        
+        // Show warning on mobile devices about potential audio issues
+        if (soundSafetyMonitor && soundSafetyMonitor.mobileDetected) {
+          console.log('Mobile device detected - activating sound safety monitoring');
+          messages[clientId] = "⚠️ Mobile device detected: Auto-safety will prevent sound loops";
+          updateHUD();
+          
+          // Automatic cautionary panic when first starting on mobile
+          // This helps clear any potential loops that might have started
+          setTimeout(() => {
+            console.log('Sending cautionary panic on mobile device startup');
+            socket.emit('panic', { type: 'stop', auto: true, reason: 'mobile_startup' });
+          }, 1000);
+        }
       }
       
       // Create a visual pulse to show audio is working
@@ -895,7 +972,7 @@ function drawVUMeter() {
     
     // Handle panic events from other clients
     socket.on('panic', (data) => {
-      console.log(`Received panic ${data.type} from ${data.from}`);      
+      console.log(`Received panic ${data.type} from ${data.from}`, data);
       
       if (data.type === 'stop') {
         // Immediate stop
@@ -919,9 +996,25 @@ function drawVUMeter() {
         activeTimers.window = null;
         activeTimers.events = [];
         
-        // Update message and HUD
-        const sender = clients[data.from]?.name || 'another user';
-        messages[clientId] = `🛑 PANIC STOP from ${sender}`;
+        // Clear sound safety tracking
+        if (soundSafetyMonitor) {
+          soundSafetyMonitor.recentSounds = [];
+        }
+        
+        // Different message based on type of panic
+        let message;
+        if (data.auto) {
+          if (data.reason === 'mobile_startup') {
+            message = `🔔 Startup safety check - Mobile device ready`;
+          } else {
+            message = `🚨 AUTO-SAFETY: Sound loop detected and stopped`;
+          }
+        } else {
+          const sender = clients[data.from]?.name || 'another user';
+          message = `🛑 PANIC STOP from ${sender}`;
+        }
+        
+        messages[clientId] = message;
         updateHUD();
         
       } else if (data.type === 'fade') {
@@ -979,13 +1072,31 @@ function drawVUMeter() {
     // Helper function to play generator sounds
     function playGeneratorSound(data) {
       console.log("playGeneratorSound called with:", JSON.stringify(data, null, 2));
-  // --- Physics: if sine event, assign SineCirclePhysics to this client ---
-  if ((data.type === 'sine' || data.type === 'sf') && clients[clientId]) {
-    if (!clients[clientId].physics || typeof clients[clientId].physics.trigger !== 'function') {
-      clients[clientId].physics = new SineCirclePhysics(clients[clientId].role === 'conductor' ? 50 : 30);
-    }
-    clients[clientId].physics.trigger(performance.now());
-  }
+      
+      // --- Sound Safety: Track this sound event and check for rapid triggering ---
+      // Don't track sounds during initialization/testing
+      if (soundSafetyMonitor && !data._isInternalTest && !soundSafetyMonitor._testMode) {
+        // Record this sound event
+        soundSafetyMonitor.recentSounds.push(Date.now());
+        
+        // Check if we're seeing too many sounds in a short period
+        checkSoundSafety();
+        
+        // Show caution message on mobile if not shown yet
+        if (soundSafetyMonitor.mobileDetected && !soundSafetyMonitor.cautionShown) {
+          messages[clientId] = "ℹ️ Mobile device detected. Auto-safety will trigger if sounds loop too rapidly.";
+          updateHUD();
+          soundSafetyMonitor.cautionShown = true;
+        }
+      }
+      
+      // --- Physics: if sine event, assign SineCirclePhysics to this client ---
+      if ((data.type === 'sine' || data.type === 'sf') && clients[clientId]) {
+        if (!clients[clientId].physics || typeof clients[clientId].physics.trigger !== 'function') {
+          clients[clientId].physics = new SineCirclePhysics(clients[clientId].role === 'conductor' ? 50 : 30);
+        }
+        clients[clientId].physics.trigger(performance.now());
+      }
 
   // Add visual feedback for audio events
   pendingVisualPulses.push(performance.now() + 100); // Add pulse with slight delay
